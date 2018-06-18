@@ -1,0 +1,128 @@
+ -- Input and output file information
+ RUN_NAME = 'steady_flow_run'
+ INPUT_FILE = 'untrim.inp'
+ -- GRID_FILE = 'junction_29_w_depth.grd'
+ GRID_FILE = 'junction_29_w_depth_2007.grd'
+ SOURCE_FILE = 'untrim.srs'
+ LOG_OUTPUT_LOCATION = 'file'
+
+ -- Simulation time information
+ START_TIME = '2018/01/01 00:00'
+ END_TIME   = '2018/01/01 06:00'
+ 
+ -- Domain geography information
+ LATITUDE = 38.1
+ LONGITUDE = 121.8
+ TIME_ZONE_LONGITUDE = 120.0
+
+ -- Bottom friction -- variable z0
+ CD_MAX = 0.2
+ NUMBER_OF_FRICTION_SETS = 1
+   -- Default Friction region #1
+   ELEVATION_DEPENDENT = 'true'
+   NUMBER_OF_ELEVATIONS = 4
+     ELEVATION = -10.0
+     Z0 = 0.0001
+     ELEVATION = -8.0
+     Z0 = 0.0002
+     ELEVATION = -4.0
+     Z0 = 0.001
+     ELEVATION = 1.0
+     Z0 = 0.004
+   USE_SUBGRID = 'true'
+
+ -- Turbulence_closure_information
+ TURBULENCE_CLOSURE = 'gls'
+   GLS_NAME = 'Two_Equation_k_eps_Rodi_1987'
+   BOUND_TOP = 'Neumann'
+   BOUND_BOT = 'Neumann'
+   STABILITY_FUNCTION = 'Kantha_Clayson'
+   SET_TURBULENCE_SCALARS = 'false'
+   MINIMUM_VERTICAL_TURBULENT_VISCOSITY = 0.000001
+   MINIMUM_VERTICAL_TURBULENT_DIFFUSIVITY = 0.000001
+   MAXIMUM_VERTICAL_TURBULENT_VISCOSITY = 0.1
+   MAXIMUM_VERTICAL_TURBULENT_DIFFUSIVITY = 0.1
+
+ -- Horizontal turbulence closure information
+ NUMBER_OF_HORIZONTAL_DIFFUSIVITY_SETS = 0
+
+ -- Water elevation initial condition information
+ WATER_ELEVATION_INITIAL_CONDITION_TYPE = 'constant'
+   INITIAL_WATER_LEVEL = 2.0
+
+ -- Water elevation boundary condition information
+ NUMBER_OF_WATER_ELEVATION_BOUNDARY_CONDITIONS = 1
+
+   -- water elevation boundary condition # 1
+   WATER_ELEVATION_BOUNDARY_CONDITION_NAME = 'Old River Constant Stage'
+   LOCATION_SPECIFICATION_TYPE = 'polygon'
+   REGION = 'Old River Downstream'
+   REGION_POLYGON_FILE = 'OldRiverDownstream.pol'
+   WATER_ELEVATION_BOUNDARY_CONDITION_TYPE = 'constant'
+     CONSTANT_WATER_ELEVATION_BOUNDARY_CONDITION_M = 2.0
+
+ NUMBER_OF_FLOW_BOUNDARY_CONDITIONS = 2
+    -- flow boundary condition # 1
+   FLOW_BOUNDARY_CONDITION_NAME = 'SJ upstream flow'
+   LOCATION_SPECIFICATION_TYPE = 'polygon'
+   REGION = 'SanJoaquinUpstream'
+   REGION_POLYGON_FILE = 'SanJoaquinUpstream.pol'
+   FLOW_BOUNDARY_CONDITION_TYPE = 'constant'
+     CONSTANT_FLOW_BOUNDARY_CONDITION = 200.0
+
+    -- flow boundary condition # 2
+   FLOW_BOUNDARY_CONDITION_NAME = 'SJ downstream flow'
+   LOCATION_SPECIFICATION_TYPE = 'polygon'
+   REGION = 'SanJoaquinDownstream'
+   REGION_POLYGON_FILE = 'SanJoaquinDownstream.pol'
+   FLOW_BOUNDARY_CONDITION_TYPE = 'constant'
+     CONSTANT_FLOW_BOUNDARY_CONDITION = -100.0
+
+ NUMBER_OF_UNTRIM_SPECIES = 0
+
+ NUMBER_OF_CONCENTRATION_INITIAL_CONDITIONS = 0
+
+ NUMBER_OF_CONCENTRATION_BOUNDARY_CONDITIONS = 0
+
+ -- Point source data
+ NUMBER_OF_POINT_SOURCES = 0
+ NUMBER_OF_DICU_SOURCES = 0
+ NUMBER_OF_CONTROL_SOURCES = 0
+
+ NUMBER_OF_CONTROL_STRUCTURES = 0   -- control structure # 1
+
+ -- Wind data
+ NUMBER_OF_WIND_SETS = 0
+
+ -- Evaporation and precipitation data
+ NUMBER_OF_EVAP_PRECIP_SETS = 0
+ 
+ -- Temperature met sets
+ NUMBER_OF_TEMPERATURE_MET_DATA_SETS = 0
+
+ -- Output information
+
+ OUTPUT_FILE_LOGGING_LEVEL = 1
+
+ CREATE_PTM_OUTPUT_FILES = 'TRUE'
+
+ CONSERVATIVE_OUTPUT_SELECTED = 'TRUE'
+ CONSERVATIVE_OUTPUT_INTERVAL_HOURS = 0.25
+ CONSERVATIVE_OUTPUT_START_TIME = '1900/01/01 00:00'
+ CONSERVATIVE_OUTPUT_END_TIME = '2100/01/01 00:00'
+ CONSERVATIVE_OUTPUT_INST_VAR_ONLY = 'FALSE'
+ SUB_DOMAIN_OUTPUT = 'FALSE'
+--    REGION = 'netcdf-subdomain'
+--    REGION_POLYGON_FILE = 'bay-Delta_subdomain.pol'
+ CONSERVATIVE_OUTPUT_CHECK_CONTINUITY = 'FALSE'
+ CONSERVATIVE_OUTPUT_TURBULENCE = 'FALSE' 
+
+ NUMBER_OF_TIME_SERIES_OUTPUT_FILES = 0
+
+ NUMBER_OF_SNAPSHOT_OUTPUT_FILES = 0
+
+ CREATE_POLARIS_OUTPUT_FILE = 'FALSE'
+
+ NUMBER_OF_SECTIONS = 0
+ NUMBER_OF_2D_SECTIONS = 0
+ NUMBER_OF_SCALAR_LOG_FILES = 0
