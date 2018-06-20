@@ -30,69 +30,54 @@ log=logging.getLogger('hor_dfm')
 
 ## --------------------------------------------------
 
-base_dir="."
-dfm_bin_dir="/Users/rusty/src/dfm/r52184-opt/bin"
-nprocs=1
+from stompy.model.delft import dflow_model
+six.moves.reload_module(dflow_model)
 
+class HORModel(dflow_model.DFlowModel):
+    dfm_bin_dir="/home/rusty/src/dfm/r53925-opt/bin"
+    nprocs=4
+    z_datum='NAVD88'
+    projection='EPSG:26910'
+
+    def bc_factory(self,params):
+        if params['name']=='SJ_upstream':
+            return self.flow_bc(Q=170.0,**params)
+        elif params['name']=='SJ_downstream':
+            return self.stage_bc(z=2.0,**params)
+        elif params['name']=='Old_River':
+            return self.stage_bc(z=2.0,**params)
+        else:
+            raise Exception("Unrecognized %s"%str(params))
+
+model=HORModel()
+
+base_dir="."
 
 # Parameters to control more specific aspects of the run
-if 1: # nice short setup for testing:
-    run_name="test_24h" 
-    run_start=np.datetime64('2012-08-01')
-    run_stop=np.datetime64('2012-08-02')
+# test_24h: proof of concept,  all free surface forcing (2.1,2.0,2.0), Kmx=2
+# hor_002: 4 cores, 10 layers, inflow, stage at outflow
+model.run_name="hor_002"
+model.run_start=np.datetime64('2012-08-01')
+model.run_stop=np.datetime64('2012-08-02')
+
+model.set_run_dir(os.path.join('runs',model.run_name), 'create')
+
+model.set_grid("../grid/derived/grid_net.nc")
+
+model.load_mdu('template.mdu')
+
+model.set_cache_dir('cache')
 
 
-run_dir=os.path.join(base_dir,'runs',run_name)
-
-grid=dfm_grid.DFMGrid("../grid/derived/grid_net.nc")
-
-##
-
-# Make sure run directory exists:
-os.path.exists(run_dir) or os.makedirs(run_dir)
-
-## --------------------------------------------------------------------------------
-# Edits to the template mdu:
-# 
-
-mdu=dio.MDUFile('template.mdu')
-
-mdu.set_time_range(start=run_start,stop=run_stop)
-
-mdu.set_filename(os.path.join(run_dir,'flowfm.mdu'))
-
-##
-
-bc_fn=mdu.filepath(['external forcing','ExtForceFile'])
-
-# clear any stale bc files:
-for fn in [bc_fn]:
-    os.path.exists(fn) and os.unlink(fn)
-
-##
-
-import stompy.model.delft.dfm_bc as bc
-
-six.moves.reload_module(bc)
-
-bc.BC.set_cache_dir('cache',create=1)
+# OPTION A:
+#  Fields of the shapefile evaluate to objects which are added to the
+#  list of boundary conditions.
 
 # features which have manually set locations for this grid
-forcing_shp=os.path.join(base_dir,'gis','forcing-v00.shp')
-features=wkb2shp.shp2geom(forcing_shp)
+model.add_bcs_from_shp(os.path.join(base_dir,'gis','forcing-v00.shp'))
 
-    
-##
+model.write()
 
-# Copy grid file into run directory and update mdu
-mdu['geometry','NetFile'] = os.path.basename(grid.filename)
-dest=os.path.join(run_base_dir, mdu['geometry','NetFile'])
-dfm_grid.write_dfm(grid,dest,overwrite=True)
+model.partition()
 
-
-mdu.write()
-
-##
-
-mdu.partition(nprocs,dfm_bin_dir=dfm_bin_dir)
 
