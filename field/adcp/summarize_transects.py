@@ -4,6 +4,7 @@ For each of the transects, summarize the data in its raw form.
 from __future__ import print_function
 
 # Read the collection of csv files associated with a sontek transect
+import numpy as np
 import pandas as pd
 import xarray as xr
 import matplotlib.pyplot as plt
@@ -12,10 +13,16 @@ import glob
 import six
 
 import read_sontek
-import read_untrim_section
+# import read_untrim_section
+import transect_to_adcpy
 from stompy.memoize import memoize
 from stompy import utils
 from stompy.plot import plot_utils
+from stompy.spatial import proj_utils
+from stompy import xr_transect, xr_utils
+
+from stompy.model.delft import dfm_grid
+import stompy.model.delft.dflow_model as dfm
 
 from adcpy import adcpy
 from adcpy import adcpy_recipes
@@ -27,16 +34,24 @@ six.moves.reload_module(adcpy.plot)
 six.moves.reload_module(adcpy.util)
 six.moves.reload_module(adcpy)
 six.moves.reload_module(read_sontek)
-six.moves.reload_module(read_untrim_section)
+six.moves.reload_module(transect_to_adcpy)
+six.moves.reload_module(dfm)
+six.moves.reload_module(xr_utils)
+
+study_zoom=[646000, 649000, 4185000, 4186500]
 
 @memoize()
 def bathy():
-    from stompy.spatial import field
-    return field.GdalGrid('../../bathy/OldRvr_at_SanJoaquinRvr2012_0104-utm-m_NAVD.tif')
+    # from stompy.spatial import field
+    #return field.GdalGrid('../../bathy/OldRvr_at_SanJoaquinRvr2012_0104-utm-m_NAVD.tif')
+    utils.path("../../bathy")
+    from bathy import dem
+    tile=dem().extract_tile(study_zoom)
+    return tile
 
 def tran_zoom(ds):
-    return utils.expand_xxyy([ds.x_utm.values.min(), ds.x_utm.values.max(),
-                              ds.y_utm.values.min(), ds.y_utm.values.max() ],
+    return utils.expand_xxyy([ds.x_sample.values.min(), ds.x_sample.values.max(),
+                              ds.y_sample.values.min(), ds.y_sample.values.max() ],
                              0.1)
 
 def set_bounds(ax,ds):
@@ -45,9 +60,10 @@ def set_bounds(ax,ds):
 
 
 # source='adcp'
-source='untrim'
-    
-fig_dir="figs-20180613-%s"%source
+# source='untrim'
+source='dfm'
+
+fig_dir="figs-20180622-%s"%source
 os.path.exists(fig_dir) or os.mkdir(fig_dir)
 
 if source=='adcp':
@@ -83,27 +99,57 @@ if source=='adcp':
 
     def ds_to_adcpy(ds):
         return read_sontek.ADCPSontekM9(ds=ds)
-    
+
 elif source=='untrim':
-    # hydro_txt_fn="../../model/untrim/ed-steady-20180608/section_hydro.txt"
-    # hydro_txt_fn="../../model/untrim/ed-steady-20180611/section_hydro.txt"
-    hydro_txt_fn="../../model/untrim/ed-steady-20180613/section_hydro.txt"
-    names=read_untrim_section.section_names(hydro_txt_fn)
-    
+    hydro_txt_fn="../../model/untrim/ed-steady/section_hydro.txt"
+    names=xr_transect.section_hydro_names(hydro_txt_fn)
+
     transects=[ (hydro_txt_fn,name) for name in names]
-    
+
     def read_transect(transect):
         hydro_txt_fn,section_name=transect
-        ds=read_untrim_section.section_hydro_to_ds(hydro_txt_fn,section_name)
+        ds=xr_transect.section_hydro_to_transect(hydro_txt_fn,section_name)
+        xy=np.c_[ds.x_sample.values,ds.y_sample.values]
+        ll=proj_utils.mapper("EPSG:26910","WGS84")(xy)
+        ds['lon']=('sample',),ll[:,0]
+        ds['lat']=('sample',),ll[:,1]
         return [ds]
     def get_tran_fig_dir(transect):
         return os.path.join(fig_dir,transect[1])
-    
     def ds_to_adcpy(ds):
-        return read_untrim_section.ADCPSectionHydro(ds=ds)
+        return transect_to_adcpy.ADCPXrTransectData(ds=ds)
+elif source=='dfm':
+    # for now, pull transect xy from the existing untrim sections
+    hydro_txt_fn="../../model/untrim/ed-steady/section_hydro.txt"
+    names=xr_transect.section_hydro_names(hydro_txt_fn)
+    dfm_map=xr.open_dataset(
+        '../../'
+        'model/dfm/dfm/'
+        'runs/hor_002/DFM_OUTPUT_flowfm/flowfm_0000_20120801_000000_map.nc')
 
-##
+    g=dfm_grid.DFMGrid(dfm_map)
+    transects=[ (hydro_txt_fn,name,dfm_map,g) for name in names]
 
+    def read_transect(transect):
+        hydro_txt_fn,section_name,dfm_map,g=transect
+        untrim_ds=xr_transect.section_hydro_to_transect(hydro_txt_fn,section_name)
+        line_xy=np.c_[untrim_ds.x_sample.values,untrim_ds.y_sample.values]
+
+        ds=dfm.extract_transect(dfm_map.isel(time=-1),line=line_xy,dx=3,grid=g)
+
+        xy=np.c_[ds.x_sample.values,ds.y_sample.values]
+
+        ll=proj_utils.mapper("EPSG:26910","WGS84")(xy)
+        ds['lon']=('sample',),ll[:,0]
+        ds['lat']=('sample',),ll[:,1]
+        return [ds]
+    def get_tran_fig_dir(transect):
+        return os.path.join(fig_dir,transect[1])
+    def ds_to_adcpy(ds):
+        return transect_to_adcpy.ADCPXrTransectData(ds=ds)
+
+dss=read_transect(transects[0])
+A=ds_to_adcpy(dss[0])
 
 transect_xy_fn=os.path.join(fig_dir,'transects-xy.csv')
 os.path.exists(transect_xy_fn) and os.unlink(transect_xy_fn)
@@ -120,7 +166,7 @@ for transect in transects:
     zoom_tight=tran_zoom(ds0)
 
     # Choose a coordinate system from the first transect:
-    xy=np.c_[ds0.x_utm.values,ds0.y_utm.values]
+    xy=np.c_[ds0.x_sample.values,ds0.y_sample.values]
     xy0=xy[0]
     across_unit=utils.to_unit( xy[-1] - xy[0] )
     # Roughly force to point river right
@@ -136,10 +182,10 @@ for transect in transects:
     along_unit=np.array( [-across_unit[1],across_unit[0]] )
 
     def ds_to_linear(ds):
-        xy=np.c_[ds.x_utm.values,ds.y_utm.values]
+        xy=np.c_[ds.x_sample.values,ds.y_sample.values]
         # pull dimensions from ds, distances from vector product
-        return ds.x_utm*0 + np.dot(xy-xy0,across_unit)
-    
+        return ds.x_sample*0 + np.dot(xy-xy0,across_unit)
+
     if 1: # Plan view quiver of each individual repeat
         for repeat,ds in enumerate(tran_dss):
             fig=plt.figure(2)
@@ -151,10 +197,10 @@ for transect in transects:
             over_ax=fig.add_axes([0,0,0.15,0.15])
 
             col='g'
-            print repeat
-            avg_east=ds.Ve.mean(dim='cell')
-            avg_north=ds.Vn.mean(dim='cell')
-            quiv=ax.quiver(ds.x_utm.values, ds.y_utm.values, avg_east.values, avg_north.values,
+            print(repeat)
+            avg_east=ds.Ve.mean(dim='layer')
+            avg_north=ds.Vn.mean(dim='layer')
+            quiv=ax.quiver(ds.x_sample.values, ds.y_sample.values, avg_east.values, avg_north.values,
                            color=col,width=0.001)
             ax.quiverkey(quiv,0.9,0.9,0.5,"0.5 m/s",coordinates='axes')
             ax.text( 0.05, 0.95,ds.source,
@@ -169,7 +215,7 @@ for transect in transects:
 
             over_ax.axis(zoom_overview)
 
-            over_ax.plot(ds.x_utm.values,ds.y_utm.values,color=col)
+            over_ax.plot(ds.x_sample.values,ds.y_sample.values,color=col)
             plot_utils.scalebar([0.3,0.03],
                                 divisions=[0,10,20,50],label_txt="m",ax=ax,xy_transform=ax.transAxes,dy=0.02)
 
@@ -183,19 +229,19 @@ for transect in transects:
         over_ax=fig.add_axes([0,0,0.15,0.15])
 
         for repeat,ds in enumerate(tran_dss):
-            print repeat
+            print(repeat)
             if len(tran_dss)>1:
                 col=cm.jet( repeat/(len(tran_dss)-1.0))
             else:
                 col='b'
-            avg_east=ds.Ve.mean(dim='cell')
-            avg_north=ds.Vn.mean(dim='cell')
-            quiv=ax.quiver(ds.x_utm.values, ds.y_utm.values, avg_east.values, avg_north.values,
+            avg_east=ds.Ve.mean(dim='layer')
+            avg_north=ds.Vn.mean(dim='layer')
+            quiv=ax.quiver(ds.x_sample.values, ds.y_sample.values, avg_east.values, avg_north.values,
                            color=col,width=0.001)
             ax.text( 0.05, 0.95-0.03*repeat,ds.source,
                      transform=ax.transAxes,color=col)
 
-            over_ax.plot(ds.x_utm.values,ds.y_utm.values,color=col)
+            over_ax.plot(ds.x_sample.values,ds.y_sample.values,color=col)
 
         for x in ax,over_ax:
             bathy().plot(ax=x,cmap='gray',vmin=-20,vmax=6)
@@ -210,7 +256,7 @@ for transect in transects:
 
         fig.savefig(os.path.join(tran_fig_dir,'quiver-2d-allrepeats.png'))
 
-    if 0: # X-Z plot of longitudinal and lateral velocity
+    if 1: # X-Z plot of longitudinal and lateral velocity
         x_lat=ds_to_linear(tran_dss[0])
         if 'depth_bt' in tran_dss[0]:
             z=-tran_dss[0].depth_bt
@@ -221,15 +267,14 @@ for transect in transects:
         zmin=z.min()-0.2
         xmin=x_lat.min() - 3.0
         xmax=x_lat.max() + 3.0
-        
+
         for repeat,ds in enumerate(tran_dss):
             ds_lateral=ds_to_linear(ds)
 
             Vlong=ds.Ve*along_unit[0] + ds.Vn*along_unit[1]
             Vlat =ds.Ve*across_unit[0] + ds.Vn*across_unit[1]
 
-            X,Z = xr.broadcast(ds_lateral,ds.location)
-            Z=-Z # -ds.location
+            X,Z = xr.broadcast(ds_lateral,ds.z_ctr)
 
             fig=plt.figure(4)
             fig.clf()
@@ -265,9 +310,9 @@ for transect in transects:
             ax_map.xaxis.set_visible(0)
             ax_map.yaxis.set_visible(0)
             set_bounds(ax_map,ds)
-            avg_east=ds.Ve.mean(dim='cell')
-            avg_north=ds.Vn.mean(dim='cell')
-            quiv=ax_map.quiver(ds.x_utm.values, ds.y_utm.values, avg_east.values, avg_north.values,
+            avg_east=ds.Ve.mean(dim='layer')
+            avg_north=ds.Vn.mean(dim='layer')
+            quiv=ax_map.quiver(ds.x_sample.values, ds.y_sample.values, avg_east.values, avg_north.values,
                                color='g',width=0.001)
 
             fig.text( 0.03,0.95,ds.attrs['source'])
@@ -284,14 +329,12 @@ for transect in transects:
         zmin=z.min()-0.2
         xmin=x_lat.min() - 3.0
         xmax=x_lat.max() + 3.0
-        
+
         for repeat,ds in enumerate(tran_dss):
             ds_lateral=ds_to_linear(ds)
-
             snr = ds.snr.mean(dim='beam')
-            
             _,freq,prof_type,cell_size = xr.broadcast(snr,ds.frequency,ds.profile_type,ds.cell_size)
-            
+
             # Assume SNR is in decibels.  Then twice the distance means really 2x the distance roundtrip,
             # which by inverse square is 4x less signal, just based on spreading.
             # atten_db_per_m = 0.5 # dB/m - very rough from lit.
@@ -316,7 +359,7 @@ for transect in transects:
 
             scat_snr=ax_snr.scatter( X,Z, 30, snr, cmap='jet',label='__nolabel__')
             scat_snr2=ax_snr_norm.scatter( X,Z, 30, snr_norm, cmap='jet',label='__nolabel__')
-            
+
             # scat_snr.set_clim([-1,1])
             plot_utils.cbar(scat_snr,label='SNR',ax=ax_snr)
             plot_utils.cbar(scat_snr2,label='SNR*dist',ax=ax_snr_norm)
@@ -343,17 +386,18 @@ for transect in transects:
             ax_map.xaxis.set_visible(0)
             ax_map.yaxis.set_visible(0)
             set_bounds(ax_map,ds)
-            avg_east=ds.Ve.mean(dim='cell')
-            avg_north=ds.Vn.mean(dim='cell')
-            quiv=ax_map.quiver(ds.x_utm.values, ds.y_utm.values, avg_east.values, avg_north.values,
+            avg_east=ds.Ve.mean(dim='layer')
+            avg_north=ds.Vn.mean(dim='layer')
+            quiv=ax_map.quiver(ds.x_sample.values, ds.y_sample.values, avg_east.values, avg_north.values,
                                color='g',width=0.001)
 
             fig.text( 0.03,0.95,ds.attrs['source'])
             fig.savefig(os.path.join(tran_fig_dir,'snr-yz-repeat%02d.png'%repeat))
-            
+
     if 1:
         from adcpy import adcpy, adcpy_recipes
         # Show secondary circulation based on ADCPy
+        # Note that adcpy wants z to be positive down, starting at the surface.
         trans=[ds_to_adcpy(ds) for ds in tran_dss]
 
         for t in trans:
@@ -361,19 +405,18 @@ for transect in transects:
 
         # if len(trans)>1:
         if 1:
-            dx=np.diff(tran_dss[0].x_utm.values)
-            dy=np.diff(tran_dss[0].y_utm.values)
+            dx=np.diff(tran_dss[0].x_sample.values)
+            dy=np.diff(tran_dss[0].y_sample.values)
             dxy=np.median(np.sqrt(dx**2 + dy**2))
             dxy=max(dxy,2.0) # 2.0m decent for ADCP. May scale larger for model.
-            dz=np.nanmedian( np.diff(tran_dss[0].location.values) )
+            dz=np.nanmedian( np.abs(np.diff(tran_dss[0].z_ctr.values)))
             dz=max(dz,0.1)
             tran_avg=adcpy_recipes.average_transects(trans,dxy=dxy,dz=dz,
                                                      plotline_orientation='river')
         else:
             tran_avg=trans[0] # doesn't work -- some error in ADCPy.
-        
+
         roz_tran=adcpy_recipes.transect_rotate(tran_avg,rotation='Rozovski')
-        
         fig=adcpy.plot.plot_flow_summary(roz_tran,fig=4)
 
         map_ax,u_ax,u_cax,v_ax,v_cax = fig.axes
@@ -403,10 +446,10 @@ if 1:
         tran_dss=read_transect(transect)
 
         for ds in tran_dss:
-            ax.plot( ds.x_utm.values, ds.y_utm.values, 'r-')
+            ax.plot( ds.x_sample.values, ds.y_sample.values, 'r-')
 
-        ax.text( tran_dss[0].x_utm.values[0],
-                 tran_dss[0].y_utm.values[0],
+        ax.text( tran_dss[0].x_sample.values[0],
+                 tran_dss[0].y_sample.values[0],
                  tran_dss[0].source,ha='right' )
 
     bathy().plot(ax=ax,cmap='gray',vmin=-20,vmax=6)
@@ -415,7 +458,7 @@ if 1:
 
     ax.axis(zoom_overview)
     fig.savefig(os.path.join(fig_dir,"all_transects_map.png"))
-    
+
 ##
 
 # Okay - seems like bottom track was thrown off by a bad initial position,

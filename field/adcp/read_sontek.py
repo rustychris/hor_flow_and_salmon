@@ -45,8 +45,8 @@ def surveyor_to_xr(rivr_fn,proj=None,source_preferences=['mat','csv']):
         mapper=proj_utils.mapper('WGS84',proj)
         ll=np.c_[ds.lon.values,ds.lat.values]
         xy=mapper(ll)
-        ds['x_utm']=ds.lon.dims,xy[:,0]
-        ds['y_utm']=ds.lon.dims,xy[:,1]
+        ds['x_sample']=ds.lon.dims,xy[:,0]
+        ds['y_sample']=ds.lon.dims,xy[:,1]
 
     # Other metadata:
     ds.attrs['rivr_filename']=rivr_fn
@@ -69,7 +69,7 @@ def _surveyor_csv_to_xr(base):
     ds['sample']=('sample',),df_snr['Sample #']
     ds['beam']=('beam',),np.arange(4)
     n_cells=int(df_snr.columns[-1].split()[0][4:]) # 'Cell66 SNR4 (db)' => 66
-    ds['cell']=('cell',),np.arange(n_cells) # 0-based!
+    ds['layer']=('layer',),np.arange(n_cells) # 0-based!
 
     ds['time']=('sample',),df_snr['Date/Time']
     ds['frequency']=('sample',), [float(s.replace('MHz','')) for s in df_snr['Frequency (MHz)']]
@@ -77,7 +77,7 @@ def _surveyor_csv_to_xr(base):
     ds['depth_m']=('sample',),df_snr['Depth (m)']
 
     snr_data=np.zeros( (len(ds.sample),
-                        len(ds.cell),
+                        len(ds.layer),
                         len(ds.beam)), 'f4')
     for col in df_snr.columns:
         if not col.startswith('Cell') or ('SNR' not in col):
@@ -87,7 +87,7 @@ def _surveyor_csv_to_xr(base):
         beam_i=int(beam[3:])-1 # 0-based
         snr_data[:,cell_i,beam_i]=df_snr[col].values
 
-    ds['snr']=('sample','cell','beam'),snr_data
+    ds['snr']=('sample','layer','beam'),snr_data
     ds['snr'].attrs['units']='dB'
 
     # velocity and cell geometry data
@@ -95,7 +95,7 @@ def _surveyor_csv_to_xr(base):
     ds['cell_size']=('sample',), df_vel['Cell Size (m)'].values
 
     x=np.zeros( ( len(ds.sample),
-                  len(ds.cell) ), 'f4' )
+                  len(ds.layer) ), 'f4' )
     per_cell={'Ve':x.copy(),
               'Vn':x.copy(),
               'Vu':x.copy(),
@@ -115,13 +115,13 @@ def _surveyor_csv_to_xr(base):
 
         per_cell[key][:,cell_i]=df_vel[col].values
 
-    ds['Ve']=('sample','cell'),per_cell['Ve']
-    ds['Vn']=('sample','cell'),per_cell['Vn']
-    ds['Vu']=('sample','cell'),per_cell['Vu']
-    ds['Vd']=('sample','cell'),per_cell['Vd']
-    ds['location']=('sample','cell'),per_cell['Location']
-    ds['water_speed']=('sample','cell'),per_cell['Spd']
-    ds['water_dir']=('sample','cell'),per_cell['Dir']
+    ds['Ve']=('sample','layer'),per_cell['Ve']
+    ds['Vn']=('sample','layer'),per_cell['Vn']
+    ds['Vu']=('sample','layer'),per_cell['Vu']
+    ds['Vd']=('sample','layer'),per_cell['Vd']
+    ds['z_ctr']=('sample','layer'),per_cell['Location']
+    ds['water_speed']=('sample','layer'),per_cell['Spd']
+    ds['water_dir']=('sample','layer'),per_cell['Dir']
 
     # summary data:
     for my_name,df_name in [ ('lat','Latitude (deg)'),
@@ -182,7 +182,7 @@ def _surveyor_mat_to_xr(base,target_ref='bt'):
     ds['beam']=('beam',),np.arange(4)
 
     n_cells=water_velocity.shape[0] 
-    ds['cell']=('cell',),np.arange(n_cells) # 0-based!
+    ds['layer']=('layer',),np.arange(n_cells) # 0-based!
 
     ds['time_raw']=('sample',), mat['System']['Time'][0,0][:,0] # seconds since 2000-01-01
     ds['time']=ds['time_raw']*np.timedelta64(1,'s') + np.datetime64("2000-01-01 00:00")
@@ -198,11 +198,11 @@ def _surveyor_mat_to_xr(base,target_ref='bt'):
     ds['depth_m']=('sample',), mat['Summary']['Depth'][0,0][:,0]
 
     snr_data=np.zeros( (len(ds.sample),
-                        len(ds.cell),
+                        len(ds.layer),
                         len(ds.beam)), 'f4')
 
     # mat['WaterTrack']['Correlation']
-    ds['snr']=('sample','cell','beam'), mat['System']['SNR'][0,0].transpose(2,0,1)
+    ds['snr']=('sample','layer','beam'), mat['System']['SNR'][0,0].transpose(2,0,1)
     ds['snr'].attrs['units']='dB'
 
     # velocity and cell geometry data
@@ -222,11 +222,11 @@ def _surveyor_mat_to_xr(base,target_ref='bt'):
     if velo_label!='gps':
         log.warning("Testing has only been with mat files using GPS reference")
 
-    ds['Ve_'+velo_label]=('sample','cell'), water_velocity[:,0,:].T
-    ds['Vn_'+velo_label]=('sample','cell'), water_velocity[:,1,:].T
+    ds['Ve_'+velo_label]=('sample','layer'), water_velocity[:,0,:].T
+    ds['Vn_'+velo_label]=('sample','layer'), water_velocity[:,1,:].T
     # Assuming that these do not need to be adjusted for BT vs GPS
-    ds['Vu']=('sample','cell'), water_velocity[:,2,:].T
-    ds['Vd']=('sample','cell'), water_velocity[:,3,:].T
+    ds['Vu']=('sample','layer'), water_velocity[:,2,:].T
+    ds['Vd']=('sample','layer'), water_velocity[:,3,:].T
 
     gps_to_bt=(ds['boat_vel'][:,:2] - ds['bottom_vel'][:,:2])
     if velo_label=='gps':
@@ -244,7 +244,9 @@ def _surveyor_mat_to_xr(base,target_ref='bt'):
         ds['Vn']=ds['Vn_gps']
 
     # matches CSV-based location, with roundoff up to 5mm.
-    ds['location']=('sample','cell'), ds.cell_start.values[:,None] + ds.cell_size.values[:,None] * (0.5+np.arange(len(ds.cell))[None,:])
+    ds['z_ctr']=('sample','layer'), ( ds.cell_start.values[:,None]
+                                      + ds.cell_size.values[:,None]
+                                      * (0.5+np.arange(len(ds.layer))[None,:]) )
 
     # confirmed to match once the GPS vs. BT difference is applied.
     ds['water_speed']=np.sqrt(ds.Ve**2 + ds.Vn**2)
@@ -308,7 +310,7 @@ try:
 
             # Starts with z as a positive-down quantity
             # use round(...,4) to drop some FP roundoff trash
-            z_in=self.ds.location.values
+            z_in=self.ds.z_ctr.values
             valid=np.isfinite(self.ds.Ve.values)
             
             min_z=round(np.nanmin(z_in[valid]),4)
