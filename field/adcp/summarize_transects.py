@@ -35,8 +35,9 @@ six.moves.reload_module(adcpy.util)
 six.moves.reload_module(adcpy)
 six.moves.reload_module(read_sontek)
 six.moves.reload_module(transect_to_adcpy)
-six.moves.reload_module(dfm)
 six.moves.reload_module(xr_utils)
+six.moves.reload_module(xr_transect)
+six.moves.reload_module(dfm)
 
 study_zoom=[646000, 649000, 4185000, 4186500]
 
@@ -148,8 +149,9 @@ elif source=='dfm':
     def ds_to_adcpy(ds):
         return transect_to_adcpy.ADCPXrTransectData(ds=ds)
 
-dss=read_transect(transects[0])
+dss=read_transect(transects[12])
 A=ds_to_adcpy(dss[0])
+##
 
 transect_xy_fn=os.path.join(fig_dir,'transects-xy.csv')
 os.path.exists(transect_xy_fn) and os.unlink(transect_xy_fn)
