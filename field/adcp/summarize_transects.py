@@ -11,12 +11,13 @@ import matplotlib.pyplot as plt
 
 import glob
 import six
+from stompy import utils
+utils.path("/home/rusty/src/ADCPy")
 
 import read_sontek
 # import read_untrim_section
 import transect_to_adcpy
 from stompy.memoize import memoize
-from stompy import utils
 from stompy.plot import plot_utils
 from stompy.spatial import proj_utils
 from stompy import xr_transect, xr_utils
@@ -64,7 +65,7 @@ def set_bounds(ax,ds):
 # source='untrim'
 source='dfm'
 
-fig_dir="figs-20180622-%s"%source
+fig_dir="figs-20180626-%s"%source
 os.path.exists(fig_dir) or os.mkdir(fig_dir)
 
 if source=='adcp':
@@ -126,7 +127,9 @@ elif source=='dfm':
     dfm_map=xr.open_dataset(
         '../../'
         'model/dfm/dfm/'
-        'runs/hor_002/DFM_OUTPUT_flowfm/flowfm_0000_20120801_000000_map.nc')
+        # 'runs/hor_002/DFM_OUTPUT_flowfm/flowfm_0000_20120801_000000_map.nc'
+        'runs/hor_003/DFM_OUTPUT_flowfm/flowfm_0000_20120801_000000_map.nc'
+    )
 
     g=dfm_grid.DFMGrid(dfm_map)
     transects=[ (hydro_txt_fn,name,dfm_map,g) for name in names]
@@ -150,7 +153,9 @@ elif source=='dfm':
         return transect_to_adcpy.ADCPXrTransectData(ds=ds)
 
 dss=read_transect(transects[12])
-A=ds_to_adcpy(dss[0])
+# A=ds_to_adcpy(dss[0])
+print(xr_transect.Qleft(dss[0]))
+
 ##
 
 transect_xy_fn=os.path.join(fig_dir,'transects-xy.csv')

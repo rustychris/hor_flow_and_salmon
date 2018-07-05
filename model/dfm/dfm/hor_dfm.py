@@ -35,7 +35,7 @@ six.moves.reload_module(dflow_model)
 
 class HORModel(dflow_model.DFlowModel):
     dfm_bin_dir="/home/rusty/src/dfm/r53925-opt/bin"
-    nprocs=4
+    num_procs=4
     z_datum='NAVD88'
     projection='EPSG:26910'
 

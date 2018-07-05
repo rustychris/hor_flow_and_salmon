@@ -1,0 +1,34 @@
+Status of DFM sections:
+
+figs-20180626-dfm:
+
+Based on runs/hor_003
+ that has Old_River ssh 1.5m
+ SJ ssh 1.55
+ SJ upstream Q=210
+
+Tran 1: mean vel: 0.6 (dfm) 0.7 (adcp)
+  seems that the ADCP shows less vertical shear, and more horizontal shear
+  max velocity in ADCP clearly much larger than max of DFM
+  the little bit of secondary that's measured is also in DFM.
+
+Tran 2: similar.
+
+UnTRIM seems to get the lateral shear much better, based on these earlier
+transects. 
+
+What did Ed use for friction?
+  CD_max=0.2
+  -10 m => z0=1e-4
+   -8 m => z0=2e-4
+   -4 m => z0=1e-3
+   +1 m => z0=4e-3
+
+Compared to my DFM run - 0.023 uniform manning n, 5e-05 baseline eddy viscosity for vertical.
+ Horizontal viscosity set to 1m2/s, probably too large.
+  => change to 0.1
+  
+
+Ed suggests forcing the flow split with a downstream Q on San Joaquin
+
+Is it worth it to do a more quantitative comparison against the transects?
