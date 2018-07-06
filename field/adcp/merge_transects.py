@@ -28,16 +28,15 @@ rivr_fns=glob.glob('%s/*.rivr'%adcp_data_dir)
 all_ds=[ read_sontek.surveyor_to_xr(fn,proj='EPSG:26910',positive='up')
          for fn in rivr_fns]
 
-
 ##
-ds=all_ds[0]
+ds=all_ds[1]
 
-fig=plt.figure(1)
-fig.clf()
+plt.figure(1).clf()
+fig,ax=plt.subplots(1,1,num=1)
 
-coll=xr_transect.plot_scalar(ds,ds.Ve)
+coll=xr_transect.plot_scalar(ds,ds.Ve,ax=ax)
 
-# plt.axis(ymin=-7,ymax=0,xmin=0,xmax=100)
+ax.plot(ds.d_sample,ds.z_bed,'k-')
 
 ##
 
@@ -47,6 +46,122 @@ def bathy():
     return field.GdalGrid('../bathy/OldRvr_at_SanJoaquinRvr2012_0104-utm-m_NAVD.tif')
 
 ##
+
+# Transect averaging:
+
+def transects_to_segment(trans,unweight=True,ax=None):
+    """
+    trans: list of transects per xr_transect
+    unweight: if True, follow ADCPy and thin dense clumps of pointer.
+
+    return a segment [ [x0,y0],[x1,y1] ] approximating the
+    points
+
+    if ax is supplied, it is a matplotlib Axes into which the steps
+    of this method are plotted.
+    """
+    from stompy.spatial import linestring_utils
+    all_xy=[]
+    all_dx=[]
+
+    all_dx=[get_dx_sample(tran).values
+            for tran in trans]
+    median_dx=np.median(np.concatenate(all_dx))
+
+    for tran_i,tran in enumerate(trans):
+        xy=np.c_[ tran.x_sample.values,tran.y_sample.values]
+
+        if ax:
+            ax.plot(xy[:,0],xy[:,1],marker='.',label='Input %d'%tran_i)
+
+        if unweight:
+            # resample_linearring() allows for adding new points, which can be
+            # problematic if the GPS jumps around, adding many new points on a
+            # rogue line segment.
+            # downsample makes sure that clusters are thinned, but does not add
+            # new points between large jumps.
+            xy=linestring_utils.downsample_linearring(xy,density=3*median_dx,
+                                                      closed_ring=False)
+        all_xy.append(xy)
+
+    all_xy=np.concatenate(all_xy)
+    if ax:
+        ax.plot(all_xy[:,0],all_xy[:,1],'bo',label='Unweighted')
+
+    C=np.cov(all_xy.T)
+    vec=utils.to_unit(C[:,0])
+
+    centroid=all_xy.mean(axis=0)
+    dist_along=np.dot((all_xy-centroid),vec)
+    dist_range=np.array( [dist_along.min(), dist_along.max()] )
+
+    seg=centroid + dist_range[:,None]*vec
+    if ax:
+        ax.plot(seg[:,0],seg[:,1],'k-o',lw=5,alpha=0.5,label='Segment')
+        ax.legend()
+    return seg
+
+trans=all_ds
+
+seg=transects_to_segment(all_ds)
+
+##
+dx=None
+dz=None
+
+#
+if dx is None:
+    # Define the target vertical and horizontal bins
+    all_dx=[get_dx_sample(tran).values
+            for tran in trans]
+    median_dx=np.median(np.concatenate(all_dx))
+    dx=median_dx
+
+if dz is None:
+    all_dz=[ np.abs(get_z_dz(tran).values.ravel())
+             for tran in trans]
+    all_dz=np.concatenate( all_dz )
+    # generally want to retain most of the vertical
+    # resolution, but not minimum dz since there could be
+    # some partial layers, near-field layers, etc.
+    # even 10th percentile may be small.
+    dz=np.percentile(all_dz,10)
+
+# Get the maximum range of valid vertical
+z_bnds=[]
+for tran in trans:
+    V,z_full,z_dz = xr.broadcast(tran.Ve, tran.z_ctr, get_z_dz(tran))
+    valid=np.isfinite(V.values)
+    z_valid=z_full.values[valid]
+    z_low=z_full.values[valid] - z_dz.values[valid]/2.0
+    z_high=z_full.values[valid] + z_dz.values[valid]/2.0
+    z_bnds.append( [z_low.min(), z_high.max()] )
+
+z_bnds=np.concatenate(z_bnds)
+z_min=z_bnds.min()
+z_max=z_bnds.max()
+
+# Resample each transect in the vertical:
+new_z=np.linspace(z_min,z_max,int(round((z_max-z_min)/dz)))
+
+##
+
+six.moves.reload_module(xr_transect)
+ds_resamp=[xr_transect.resample_z(tran,new_z)
+           for tran in trans]
+
+##
+
+plt.figure(2).clf()
+fig,axs=plt.subplots(2,1,num=2,sharex=True,sharey=True)
+
+xr_transect.plot_scalar(all_ds[0],all_ds[0].Ve,ax=axs[0])
+xr_transect.plot_scalar(ds_resamp[0],ds_resamp[0].Ve,ax=axs[1])
+
+##
+
+# HERE: map horizontal
+# 
 
 # x-z of a single transect:
 

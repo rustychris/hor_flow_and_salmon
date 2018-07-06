@@ -14,7 +14,8 @@ log=logging # .getLogger('read_sontek')
 ##
 
 def surveyor_to_xr(rivr_fn,proj=None,source_preferences=['mat','csv'],
-                   positive='down'):
+                   positive='down',
+                   z_bed_preferences=['depth_bt','depth_vb']):
     """
     Read River Surveyor outputs (post-processed rivr file as either MAT
     or CSV).
@@ -52,6 +53,7 @@ def surveyor_to_xr(rivr_fn,proj=None,source_preferences=['mat','csv'],
         ds['x_sample']=ds.lon.dims,xy[:,0]
         ds['y_sample']=ds.lon.dims,xy[:,1]
 
+
     # Other metadata:
     ds.attrs['rivr_filename']=rivr_fn
     ds.attrs['source']=rivr_fn
@@ -59,11 +61,20 @@ def surveyor_to_xr(rivr_fn,proj=None,source_preferences=['mat','csv'],
     if positive=='up':
         ds.z_ctr.values *= -1
         ds.z_ctr.attrs['positive']='up'
+
+        ds['z_bed']=-ds[z_bed_preferences[0]]
+        ds.z_bed.attrs['positive']='up'
     else:
         ds.z_ctr.attrs['positive']='down'
 
-    return ds
+        ds['z_bed']=ds[z_bed_preferences[0]]
+        ds.z_bed.attrs['positive']='down'
 
+    log.info("Assuming Sontek data is relative to transducer, including depth")
+    ds.z_bed.attrs['datum']='transducer'
+    ds.z_ctr.attrs['datum']='transducer'
+
+    return ds
 
 def _surveyor_csv_to_xr(base):
     ds=xr.Dataset()
