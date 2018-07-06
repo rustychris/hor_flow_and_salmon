@@ -11,17 +11,21 @@ import re
 import logging
 log=logging # .getLogger('read_sontek')
 
-## 
+##
 
-def surveyor_to_xr(rivr_fn,proj=None,source_preferences=['mat','csv']):
+def surveyor_to_xr(rivr_fn,proj=None,source_preferences=['mat','csv'],
+                   positive='down'):
     """
     Read River Surveyor outputs (post-processed rivr file as either MAT
     or CSV).
 
     Return results in xarray Dataset.
 
-    source_preferences: list of formats to check for, currently only 
-    mat or csv.  
+    source_preferences: list of formats to check for, currently only
+    mat or csv.
+
+    positive: if 'up', flip the coordinates so that positive values are
+    up.  otherwise default to positive=down
     """
     suffix=rivr_fn.split('.')[-1]
     assert suffix in ['rivr','riv']
@@ -37,10 +41,10 @@ def surveyor_to_xr(rivr_fn,proj=None,source_preferences=['mat','csv']):
             ds=_surveyor_csv_to_xr(base)
             if ds is not None:
                 break
-            
+
     if ds is None:
         raise Exception("Couldn't find any post-processed files for %s"%rivr_fn)
-    
+
     if proj is not None:
         mapper=proj_utils.mapper('WGS84',proj)
         ll=np.c_[ds.lon.values,ds.lat.values]
@@ -51,6 +55,12 @@ def surveyor_to_xr(rivr_fn,proj=None,source_preferences=['mat','csv']):
     # Other metadata:
     ds.attrs['rivr_filename']=rivr_fn
     ds.attrs['source']=rivr_fn
+
+    if positive=='up':
+        ds.z_ctr.values *= -1
+        ds.z_ctr.attrs['positive']='up'
+    else:
+        ds.z_ctr.attrs['positive']='down'
 
     return ds
 

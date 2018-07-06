@@ -1,4 +1,7 @@
-# Read the collection of csv files associated with a sontek transect
+"""
+Average multiple transects.
+"""
+
 import pandas as pd
 import xarray as xr
 import matplotlib.pyplot as plt
@@ -8,23 +11,33 @@ import glob
 import read_sontek
 from stompy.memoize import memoize
 
+import six
+from stompy import xr_transect
+
+six.moves.reload_module(xr_transect)
+six.moves.reload_module(read_sontek)
+
+#---
+
+# Choose 2, because it has the matlab output which is richer and has
+# RiverSurveyor computed flows.
+adcp_data_dir="040518_BT/040518_2BTref"
+
+rivr_fns=glob.glob('%s/*.rivr'%adcp_data_dir)
+
+all_ds=[ read_sontek.surveyor_to_xr(fn,proj='EPSG:26910',positive='up')
+         for fn in rivr_fns]
+
+
 ##
+ds=all_ds[0]
 
-#fig_dir="figs-20180514"
-#os.path.exists(fig_dir) or os.mkdir(fig_dir)
+fig=plt.figure(1)
+fig.clf()
 
-##
+coll=xr_transect.plot_scalar(ds,ds.Ve)
 
-bt_dir='040518_7_BTref'
-gps_dir='040518_7_GPSref'
-rivr_fns=[os.path.basename(f) for f in glob.glob('%s/*.rivr'%bt_dir)] 
-
-all_bt=[]
-
-for fn in rivr_fns:
-    ds=read_sontek.surveyor_to_xr('%s/%s'%(bt_dir,fn),
-                                  proj='EPSG:26910')
-    all_bt.append(ds)
+# plt.axis(ymin=-7,ymax=0,xmin=0,xmax=100)
 
 ##
 
