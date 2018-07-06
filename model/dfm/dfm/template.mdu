@@ -104,10 +104,10 @@ UnifFrictType     = 1                   # Uniform friction type (0: Chezy, 1: Ma
 UnifFrictCoef1D   = 0.023               # Uniform friction coefficient in 1D links (0: no friction)
 UnifFrictCoefLin  = 0                   # Uniform linear friction coefficient for ocean models (m/s) (0: no friction)(0: no friction)
 Umodlin           = 1                   # Linear friction umod, for ifrctyp=4,5,6
-Vicouv            = 1                   # Uniform horizontal eddy viscosity (m2/s)
+Vicouv            = 0.1                   # Uniform horizontal eddy viscosity (m2/s)
 Dicouv            = 0.001               # Uniform horizontal eddy diffusivity (m2/s)
-Vicoww            = 5E-05               # uniform vertical eddy viscosity (m2/s)
-Dicoww            = 5E-05               # uniform vertical eddy diffusivity (m2/s)
+Vicoww            = 1E-06               # uniform vertical eddy viscosity (m2/s)
+Dicoww            = 1E-06               # uniform vertical eddy diffusivity (m2/s)
 Vicwminb          = 0                   # Minimum visc in prod and buoyancy term (m2/s)
 Smagorinsky       = 0                   # Smagorinsky factor in horizontal turbulence
 Elder             = 0                   # Elder factor in horizontal turbulence
@@ -120,7 +120,7 @@ TidalForcing      = 0                   # Tidal forcing, if jsferic=1 (0: no, 1:
 Doodsonstart      = 55.565              # TRIWAQ: 55.565, D3D: 57.555
 Doodsonstop       = 375.575             # TRIWAQ: 375.575, D3D: 275.555
 Doodsoneps        = 0.03                # TRIWAQ = 0.0  400 cmps , D3D = 0.03   60 cmps
-Salinity          = 1                   # Include salinity, (0=no, 1=yes)
+Salinity          = 0                   # Include salinity, (0=no, 1=yes)
 InitialSalinity   = 0                   # Uniform initial salinity concentration (ppt)
 Sal0abovezlev     = -999                # Vertical level (m) above which salinity is set 0
 DeltaSalinity     = -999                # for testcases
