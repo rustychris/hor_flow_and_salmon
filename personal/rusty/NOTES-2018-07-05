@@ -25,10 +25,12 @@ What did Ed use for friction?
    +1 m => z0=4e-3
 
 Compared to my DFM run - 0.023 uniform manning n, 5e-05 baseline eddy viscosity for vertical.
+Change to 1e-6 for molecular
  Horizontal viscosity set to 1m2/s, probably too large.
   => change to 0.1
-  
 
 Ed suggests forcing the flow split with a downstream Q on San Joaquin
+  => don't currently have a good measure of the true flow split, but probably possible
+     with RiverSurveyor and going back into the ADCP data
 
 Is it worth it to do a more quantitative comparison against the transects?
