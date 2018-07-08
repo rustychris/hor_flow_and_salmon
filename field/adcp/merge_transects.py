@@ -160,8 +160,21 @@ xr_transect.plot_scalar(ds_resamp[0],ds_resamp[0].Ve,ax=axs[1])
 
 ##
 
-# HERE: map horizontal
-# 
+# Keep this general, so that segment is allowed to have more than
+# just two vertices
+new_xy = linestring_utils.resample_linearring(seg,dx)
+
+##
+
+# resampling a single transect onto the new horizontal coordinates.
+# can only operate on transects which have a uniform z coordinate
+ds_in=ds_resamp[0]
+assert ds_in.z_ctr.ndim==1,"Resampling horizontal requires uniform vertical coordinate"
+
+## 
+new_ds=xr.Dataset()
+new_ds['z'
+
 
 # x-z of a single transect:
 

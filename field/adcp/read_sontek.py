@@ -173,12 +173,19 @@ def _surveyor_csv_to_xr(base):
 def _surveyor_mat_to_xr(base,target_ref='bt'):
     mat_fn=base+'mat'
 
-    mat=scipy.io.loadmat(mat_fn)
+    try:
+        mat=scipy.io.loadmat(mat_fn)
+    except TypeError:
+        print("MAT file may be corrupted. Back off")
+        mat=scipy.io.loadmat(mat_fn,
+                             variable_names=['Setup', 'SiteInfo', 'Processing', 'SystemHW',
+                                             'Transformation_Matrices', 'System', 'Summary',
+                                             'BottomTrack', 'GPS', 'WaterTrack'])
 
     if 'WaterTrack' not in mat:
         log.warning("MAT file %s does not contain velocity data"%mat_fn)
         return None
-    
+
     # ['System',
     #  'WaterTrack',
     #  'SystemHW',
@@ -207,7 +214,6 @@ def _surveyor_mat_to_xr(base,target_ref='bt'):
 
     ds['time_raw']=('sample',), mat['System']['Time'][0,0][:,0] # seconds since 2000-01-01
     ds['time']=ds['time_raw']*np.timedelta64(1,'s') + np.datetime64("2000-01-01 00:00")
-
 
     # reported in kHz.
     ds['frequency']=('sample',), mat['WaterTrack']['WT_Frequency'][0,0][:,0]/1000.
@@ -283,8 +289,12 @@ def _surveyor_mat_to_xr(base,target_ref='bt'):
     # Could be used to get track distance
     # track_xy=mat['Summary']['Track'][0,0]
     ds['heading'] = ('sample',), mat['System']['Heading'][0,0][:,0]
-    ds['pitch']  = ('sample',), mat['Compass']['Pitch'][0,0][:,0]
-    ds['roll']  = ('sample',), mat['Compass']['Roll'][0,0][:,0]
+    if 'Compass' in mat:
+        ds['pitch']  = ('sample',), mat['Compass']['Pitch'][0,0][:,0]
+        ds['roll']  = ('sample',), mat['Compass']['Roll'][0,0][:,0]
+    else:
+        print("No pitch or roll as Compass could not be read")
+
     ds['depth_bt'] = ('sample',), mat['BottomTrack']['BT_Depth'][0,0][:,0]
     ds['depth_vb'] = ('sample',), mat['BottomTrack']['VB_Depth'][0,0][:,0]
 

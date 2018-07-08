@@ -62,11 +62,15 @@ def set_bounds(ax,ds):
 
 
 # source='adcp'
-# source='untrim'
-source='dfm'
+source='untrim'
+# source='dfm'
+# source='dfm_advec01'
+# source='dfm_advec00'
+# source="dfm_advec02"
 
-fig_dir="figs-20180626-%s"%source
+fig_dir="figs-20180707-%s"%source
 os.path.exists(fig_dir) or os.mkdir(fig_dir)
+
 
 if source=='adcp':
     # Data from each set of repeats is in a single folder
@@ -120,15 +124,29 @@ elif source=='untrim':
         return os.path.join(fig_dir,transect[1])
     def ds_to_adcpy(ds):
         return transect_to_adcpy.ADCPXrTransectData(ds=ds)
-elif source=='dfm':
+elif source.startswith('dfm'):
     # for now, pull transect xy from the existing untrim sections
     hydro_txt_fn="../../model/untrim/ed-steady/section_hydro.txt"
     names=xr_transect.section_hydro_names(hydro_txt_fn)
+
+    if source=='dfm':
+        # older run with 33 advection but higher viscosity
+        run_name='hor_003'
+    else:
+        run_name='hor_005'
+        if source=='dfm_advec00':
+            run_name+='_advec00'
+        elif source=='dfm_advec01':
+            run_name+='_advec01'
+        elif source=='dfm_advec02':
+            run_name+='_advec02'
+        else:
+            raise Exception("Need to configure source=%s"%source)
+
     dfm_map=xr.open_dataset(
-        '../../'
-        'model/dfm/dfm/'
-        # 'runs/hor_002/DFM_OUTPUT_flowfm/flowfm_0000_20120801_000000_map.nc'
-        'runs/hor_003/DFM_OUTPUT_flowfm/flowfm_0000_20120801_000000_map.nc'
+        ('../../'
+         'model/dfm/dfm/'
+         'runs/%s/DFM_OUTPUT_flowfm/flowfm_0000_20120801_000000_map.nc')%run_name
     )
 
     g=dfm_grid.DFMGrid(dfm_map)
@@ -152,9 +170,9 @@ elif source=='dfm':
     def ds_to_adcpy(ds):
         return transect_to_adcpy.ADCPXrTransectData(ds=ds)
 
-dss=read_transect(transects[12])
+# dss=read_transect(transects[12])
 # A=ds_to_adcpy(dss[0])
-print(xr_transect.Qleft(dss[0]))
+# print(xr_transect.Qleft(dss[0]))
 
 ##
 
@@ -263,7 +281,7 @@ for transect in transects:
 
         fig.savefig(os.path.join(tran_fig_dir,'quiver-2d-allrepeats.png'))
 
-    if 1: # X-Z plot of longitudinal and lateral velocity
+    if 0: # X-Z plot of longitudinal and lateral velocity
         x_lat=ds_to_linear(tran_dss[0])
         if 'depth_bt' in tran_dss[0]:
             z=-tran_dss[0].depth_bt
