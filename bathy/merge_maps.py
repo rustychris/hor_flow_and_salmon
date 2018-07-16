@@ -191,6 +191,24 @@ flow_links[boundary] = -flow_links[boundary] + gg.Ncells()
 gds[vname]=dss[0][vname].dims,flow_links
 
 ##
+elem_flags=np.zeros(gg.Ncells(),np.int32)
+
+# Remove ghosts from maps, at least for cells
+for proc in range(nproc):
+    flow_elem_dom=dss[proc].FlowElemDomain.values
+    # a little defensive check to make sure this is 0-based.
+    assert flow_elem_dom.min()>=0
+    assert flow_elem_dom.max()<=nproc-1
+    non_local=flow_elem_dom!=proc
+    cell_maps[proc][non_local]=-1
+
+    # And make sure that all flow elements still have somebody
+    # mapped to them.
+    valid=cell_maps[proc]>=0
+    elem_flags[ cell_maps[proc][valid] ]=1
+assert np.all(elem_flags==1)
+
+##
 
 mappers={}
 mappers[mesh_topology.node_dimension]=node_maps
@@ -210,12 +228,11 @@ assert shapes[mesh_topology.node_dimension]==gg.Nnodes()
 assert shapes[mesh_topology.edge_dimension]==gg.Nedges()
 assert shapes[mesh_topology.face_dimension]==gg.Ncells()
 
-
 ##
 
 for vname in data_vars_to_copy:
     v=dss[0][vname]
-    print("Copying variable %s"%vname)
+    print("Copying variable %30s"%vname, end="")
     dims=v.dims
 
     shape=list(v.shape)
@@ -227,18 +244,19 @@ for vname in data_vars_to_copy:
         elif d in gds.dims:
             shape[di]=len(gds[d])
         else:
-            print("   dim %s will pass through"%d)
+            print(" [dim %s will pass through]"%d,end="")
 
     new_val=np.zeros(shape,v.dtype)
     if len(shape)==0:
         # could check to make sure this is the same across procs
         gds[vname]=v
+        print()
         continue
 
     new_val[:] = np.nan
 
     for proc in range(nproc):
-        print(" proc %d"%(proc),end="")
+        print(" %d"%(proc),end="")
         old_sel=[slice(None)]*len(dims)
         new_sel=[slice(None)]*len(dims)
 
@@ -266,20 +284,4 @@ gds.close()
 
 ##
 
-ds=xr.open_dataset('merged_map.nc')
-
-g=unstructured_grid.UnstructuredGrid.from_ugrid(ds)
-
-##
-
-fig=plt.figure(1)
-fig.clf()
-fig,ax=plt.subplots(num=1)
-
-# g.plot_edges(ax=ax,lw=0.4,color='k')
-import stompy.plot.cmap as scmap
-cmap=scmap.load_gradient('hot_desaturated.cpt')
-ccoll=g.plot_cells(values=ds.s1.values,ax=ax,cmap=cmap)
-ccoll.set_clim([2,2.5])
-ax.axis('equal')
 
