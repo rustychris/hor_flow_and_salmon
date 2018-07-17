@@ -18,12 +18,6 @@ dem=bathy.dem()
 
 ##
 
-# This is written out by merge_maps.py, currently just for one timestamp.
-ds=xr.open_dataset('merged_map.nc')
-g=unstructured_grid.UnstructuredGrid.from_ugrid(ds)
-
-##
-
 class InterpZhang(object):
     def __init__(self,g,u,v,clip=None):
         """
@@ -177,6 +171,10 @@ xyz_input=adcp_xyz.copy()
 xyz_input[:,2] = dem( xyz_input[:,:2] )
 
 ##
+
+# This is written out by merge_maps.py, currently just for one timestamp.
+ds=xr.open_dataset('merged_map.nc')
+g=unstructured_grid.UnstructuredGrid.from_ugrid(ds)
 
 iz=InterpZhang(g,
                u=ds.ucxa.values,
