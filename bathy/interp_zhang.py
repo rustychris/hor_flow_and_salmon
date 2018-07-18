@@ -104,7 +104,7 @@ class InterpZhang(object):
 
             if np.isfinite(self.t_net.nodes['value'][n]):
                 continue # this is a sample
-            elif (self.t_net.nodes['u'][n]==0) and (t_net.nodes['v'][n]==0):
+            elif (self.t_net.nodes['u'][n]==0) and (self.t_net.nodes['v'][n]==0):
                 continue # not wet in the model, or still water.
 
             # search from n along edges of t_net, with cost Td,
@@ -370,7 +370,25 @@ ax.plot(xyz_input[:,0],xyz_input[:,1],'k.',ms=0.3)
 ax.axis('equal')
 
 ax.axis( (646917., 647721, 4185492., 4186106.) )
+
+# The cartesian results look significantly worse.  Is velocity getting on the
+# grid properly?
 # fig.savefig('zhang-on-grid.png')
+
+##
+zoom=(646855, 647695, 4185473, 4186134)
+
+plt.figure(12).clf()
+fig,ax=plt.subplots(num=12)
+iz.g.plot_cells(ax=ax,lw=0.1,facecolor='none',edgecolor='k',clip=zoom)
+
+valid=(iz.t_net.nodes['u']!=0.0)|(iz.t_net.nodes['v']!=0.0)
+ax.quiver( iz.t_net.nodes['x'][valid,0],
+           iz.t_net.nodes['x'][valid,1],
+           iz.t_net.nodes['u'][valid],
+           iz.t_net.nodes['v'][valid],
+           scale=10)
+ax.axis('equal')
 
 ##
 
