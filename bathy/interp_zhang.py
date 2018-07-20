@@ -6,11 +6,14 @@ import numpy as np
 import xarray as xr
 from stompy import utils
 from stompy.grid import unstructured_grid
+from stompy.plot import plot_utils
 from stompy.model.delft import dfm_grid
 from stompy.spatial import wkb2shp, proj_utils
 import stompy.plot.cmap as scmap
 cmap=scmap.load_gradient('hot_desaturated.cpt')
 six.moves.reload_module(unstructured_grid)
+
+from sklearn.cluster import AgglomerativeClustering
 
 ##
 
@@ -50,14 +53,18 @@ class InterpZhang(object):
             dx,dy=xy[1,:] - xy[0,:]
             u=self.t_net.nodes['u'][nodes].sum()
             v=self.t_net.nodes['v'][nodes].sum()
-            # can't drop signs until here, otherwise we lose quadrant information
-            # doing it here also allows for protecting against division by zero.
-            u_tan=abs(u*dx+v*dy)
-            if u_tan!=0.0:
-                Tab=(2*(dx**2 +dy**2))/u_tan
-            else:
-                Tab=np.nan
-            self.t_net.edges['Td'][j]=Tab
+
+            self.t_net.edges['Td'][j]=self.calc_Td_single(j,u,v,dx,dy)
+
+    def calc_Td_single(self,j,u,v,dx,dy):
+        # can't drop signs until here, otherwise we lose quadrant information
+        # doing it here also allows for protecting against division by zero.
+        u_tan=abs(u*dx+v*dy)
+        if u_tan!=0.0:
+            Tab=(2*(dx**2 +dy**2))/u_tan
+        else:
+            Tab=np.nan
+        self.t_net.edges['Td'][j]=Tab
 
     def set_samples(self,xyz_input):
         """
@@ -132,7 +139,7 @@ class InterpZhangDual(InterpZhang):
 
         # transit time network
         self.t_net=unstructured_grid.UnstructuredGrid(extra_node_fields=[('value',np.float64),
-                                                                         ('dual_cell',np.int32)
+                                                                         ('dual_cell',np.int32),
                                                                          ('hydro_cell',np.int32)],
                                                       extra_edge_fields=[('Td',np.float64)])
 
@@ -163,9 +170,9 @@ class InterpZhangDual(InterpZhang):
 
     def set_velocity_on_net(self):
         """
-        Assign per-node velocities 
+        Assign per-node velocities
         """
-        cells=self.t_net.nodes['cell']
+        cells=self.t_net.nodes['hydro_cell']
         self.t_net.add_node_field( 'u',self.uv[cells,0],on_exists='overwrite')
         self.t_net.add_node_field( 'v',self.uv[cells,1],on_exists='overwrite')
 
@@ -218,10 +225,11 @@ class InterZhangCartesian(InterpZhang):
 
         # cartesian dual, with each cell being a pixel of the end DEM
         self.t_dual=unstructured_grid.UnstructuredGrid()
-        self.cart_map = self.t_dual.add_rectilinear( p0,p1,nx,ny )
-        # cart_map gets ['cells'] => [nx-1,ny-1] array to cell index
+        # nx,ny are number of intervals, but add_rectilinear wants
+        # number of nodes, so add 1 to avoid fencepost error
+        self.cart_map = self.t_dual.add_rectilinear( p0,p1,nx+1,ny+1 )
+        # cart_map gets ['cells'] => [nx,ny] array to cell index
         # similar for nodes.
-
         dual_cell_to_g=np.zeros( self.t_dual.Ncells(), np.int32)-1
         # clip to the region of the hydro grid.
         to_delete=[]
@@ -235,7 +243,8 @@ class InterZhangCartesian(InterpZhang):
         for c in to_delete:
             self.t_dual.delete_cell(c)
 
-        self.t_dual.renumber() # need to toss unused nodes, edges, too.
+        # need to toss unused nodes, edges, too.
+        self.renumber_maps=self.t_dual.renumber()
 
         # transit time network
         self.t_net=unstructured_grid.UnstructuredGrid(extra_node_fields=[('value',np.float64),
@@ -278,6 +287,36 @@ class InterZhangCartesian(InterpZhang):
         self.t_net.add_node_field( 'u',self.uv[hydro_cells,0],on_exists='overwrite')
         self.t_net.add_node_field( 'v',self.uv[hydro_cells,1],on_exists='overwrite')
 
+    def as_raster(self):
+        # Have the values on t_dual cells, which are a subset of the
+        # the dense grid
+        raster_values=np.nan*np.zeros( self.cart_map['cells'].shape,np.float64)
+
+        ren_cell_map=self.renumber_maps['cell_map']
+        raster_targets=ren_cell_map[self.cart_map['cells']]
+        valid=raster_targets>=0
+
+        # This is a little roundabout given that we know
+        # the t_net nodes are equivalent to t_dual cells.  but this way
+        # is more general, and not that slow.
+        cell_values=np.zeros( self.t_dual.Ncells(),'f8' )
+        cell_values[:]=np.nan
+        cell_values[self.t_net.nodes['dual_cell']]=self.t_net.nodes['int_value']
+
+        raster_values[valid]=cell_values[raster_targets[valid]]
+        # cart_map is organized x,y, so transpose to get the row,col
+        # order that SimpleGrid expects
+        raster_values=raster_values.T
+
+        # also note that SimpleGrid expects extents based on centers,
+        # while clip gave the node indices.  so offset a half pixel here
+        f=field.SimpleGrid( extents=[self.clip[0]+self.dx/2,
+                                     self.clip[1]-self.dx/2,
+                                     self.clip[2]+self.dy/2,
+                                     self.clip[3]-self.dy/2],
+                            F=raster_values)
+        return f
+
 
 ##
 
@@ -288,11 +327,26 @@ adcp_xyz=np.c_[ adcp_xy,adcp_shp['depth'] ]
 
 ##
 
-# Rather than use the ADCP data directly, during testing
-# use its horizontal distribution, but pull "truth" from the
-# DEM
+src='dem'
+cluster=True
+
 xyz_input=adcp_xyz.copy()
-xyz_input[:,2] = dem( xyz_input[:,:2] )
+if src=='dem':
+    # Rather than use the ADCP data directly, during testing
+    # use its horizontal distribution, but pull "truth" from the
+    # DEM
+    xyz_input[:,2] = dem( xyz_input[:,:2] )
+
+if cluster:
+    linkage='complete'
+    n_clusters=3000
+    clustering = AgglomerativeClustering(linkage=linkage, n_clusters=n_clusters)
+    clustering.fit(xyz_input[:,:2])
+
+    group_xyz=np.zeros( (n_clusters,3) )
+    for grp,members in utils.enumerate_groups(clustering.labels_):
+        group_xyz[grp] = xyz_input[members].mean(axis=0)
+    xyz_input=group_xyz
 
 ##
 
@@ -300,63 +354,34 @@ xyz_input[:,2] = dem( xyz_input[:,:2] )
 ds=xr.open_dataset('merged_map.nc')
 g=unstructured_grid.UnstructuredGrid.from_ugrid(ds)
 
-iz=InterpZhang(g,
-               u=ds.ucxa.values,
-               v=ds.ucya.values,
-               clip=(646966, 647602, 4185504, 4186080))
-iz.set_samples(xyz_input)
-iz.interpolate()
-
 ##
 
-iz=InterZhangCartesian(g,
+if 0:
+    iz=InterpZhangDual(g,
                        u=ds.ucxa.values,
                        v=ds.ucya.values,
-                       clip=(646966, 647602, 4185504, 4186080),
-                       dx=2,dy=2)
+                       clip=(646966, 647602, 4185504, 4186080))
+    iz.set_samples(xyz_input)
+    iz.interpolate()
+else:
+    iz=InterZhangCartesian(g,
+                           u=ds.ucxa.values,
+                           v=ds.ucya.values,
+                           clip=(646966, 647602, 4185504, 4186080),
+                           dx=2,dy=2)
 
-iz.set_samples(xyz_input)
-iz.interpolate()
-
-##
-
-plt.figure(1).clf()
-fig,ax=plt.subplots(num=1)
-iz.t_dual.plot_cells(ax=ax)
-iz.t_net.plot_edges(lw=0.3,color='k',ax=ax)
-iz.t_net.plot_nodes(values=iz.t_net.nodes['int_value'],sizes=40,ax=ax)
-
-ax.axis('equal')
-
-##
-
-plt.figure(11).clf()
-fig,ax=plt.subplots(num=11)
-ecoll=iz.t_net.plot_edges(values=iz.t_net.edges['Td'],lw=2.,ax=ax)
-plot_utils.cbar(ecoll)
-ax.axis('equal')
-
-# iz.t_net.plot_nodes(values=t_net.nodes['value'],zorder=2)
-
-##
-
-fig=plt.figure(10)
-fig.clf()
-fig,ax=plt.subplots(num=10)
-
-t_net=iz.t_net
-t_net.plot_edges(ax=ax,color='k',lw=0.5,alpha=0.3)
-t_net.plot_nodes(ax=ax,values=t_net.nodes['int_value'],sizes=40,cmap=cmap)
+    iz_search_n=40 # 8 was not enough. 20 wasn't enough either.
+    iz.set_samples(xyz_input)
+    iz.interpolate()
 
 ##
 
 cell_values=np.zeros( iz.t_dual.Ncells(),'f8' )
 cell_values[:]=np.nan
-# value looks fine, but int_value is off.
+
 cell_values[iz.t_net.nodes['dual_cell']]=iz.t_net.nodes['int_value']
 
 plt.figure(11).clf()
-fig.clf()
 fig,ax=plt.subplots(num=11)
 
 # iz.g.plot_edges(color='k',lw=0.2,clip=clip)
@@ -374,43 +399,19 @@ ax.axis( (646917., 647721, 4185492., 4186106.) )
 # The cartesian results look significantly worse.  Is velocity getting on the
 # grid properly?
 # fig.savefig('zhang-on-grid.png')
-
-##
-zoom=(646855, 647695, 4185473, 4186134)
-
-plt.figure(12).clf()
-fig,ax=plt.subplots(num=12)
-iz.g.plot_cells(ax=ax,lw=0.1,facecolor='none',edgecolor='k',clip=zoom)
-
-valid=(iz.t_net.nodes['u']!=0.0)|(iz.t_net.nodes['v']!=0.0)
-ax.quiver( iz.t_net.nodes['x'][valid,0],
-           iz.t_net.nodes['x'][valid,1],
-           iz.t_net.nodes['u'][valid],
-           iz.t_net.nodes['v'][valid],
-           scale=10)
-ax.axis('equal')
+# fig.savefig('zhang-on-grid-cluster.png')
 
 ##
 
-cc=iz.g.cells_center()
-# Grab point-wise samples from original DEM for comparison
-dem_values=dem(cc)
+f=iz.as_raster()
+f.write_gdal("zhang-dem.tif")
 
 ##
 
-plt.figure(12).clf()
-fig.clf()
-fig,ax=plt.subplots(num=12)
+# is it possible to search downstream and upstream separately?
+# then we choose search_n/2 samples from downstream, search_n/2
+# from upstream, and run IDW on the combined set?
+# this means changing 
 
-iz.g.plot_edges(color='k',lw=0.2,clip=clip)
-ccoll=iz.g.plot_cells(values=cell_values-dem_values,
-                      mask=np.isfinite(cell_values),clip=clip,cmap='seismic',ax=ax)
-ccoll.set_clim([-1,1])
-plot_utils.cbar(ccoll,label='Interp-DEM (m)')
 
-ax.plot(xyz_input[:,0],xyz_input[:,1],'k.',ms=0.3)
-ax.axis('equal')
 
-ax.axis( (646917., 647721, 4185492., 4186106.) )
-fig.tight_layout()
-# fig.savefig('zhang-on-grid-errors.png')
