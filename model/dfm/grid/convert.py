@@ -15,7 +15,7 @@ g.delete_edge_field('subgrid')
 mrf=field.MultiRasterField(["/Users/rusty/data/bathy_dwr/gtiff/*.tif"])
 
 
-## 
+##
 
 edge_xy=g.edges_center()
 

@@ -39,7 +39,7 @@ adcp_ll=np.array( [ np.array(pnt) for pnt in adcp_shp['geom']] )
 adcp_xy=proj_utils.mapper('WGS84','EPSG:26910')(adcp_ll)
 adcp_xyz=np.c_[ adcp_xy,adcp_shp['depth'] ]
 
-src='adcp' # 'adcp' or 'dem'
+src='dem' # 'adcp' or 'dem'
 cluster=True
 quant_xy=False
 
@@ -474,7 +474,7 @@ ax.axis(rect)
 # f.write_gdal('adcp-rbf.tif')
 # f.write_gdal('tile-rbf-qtracks.tif')
 # f.write_gdal('adcp-rbf-qtracks.tif')
-f.write_gdal('adcp-rbf-cluster.tif')
+f.write_gdal('tile-rbf-cluster.tif')
 
 ##
 
@@ -484,6 +484,6 @@ from scipy import ndimage
 Fmed=ndimage.median_filter(f.F,size=3)
 fmed=field.SimpleGrid(extents=f.extents,F=Fmed)
 
-fmed.write_gdal('adcp-rbf-cluster-med3.tif')
+fmed.write_gdal('tile-rbf-cluster-med3.tif')
 
 

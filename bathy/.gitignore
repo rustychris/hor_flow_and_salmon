@@ -1,2 +1,4 @@
 derived
 __pycache__
+*.tif
+merged_map.nc

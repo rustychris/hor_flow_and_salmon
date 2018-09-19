@@ -62,15 +62,19 @@ def set_bounds(ax,ds):
 
 
 # source='adcp'
-source='untrim'
+# source='untrim'
 # source='dfm'
 # source='dfm_advec01'
 # source='dfm_advec00'
 # source="dfm_advec02"
+# source="dfm_advec04"
+# source="dfm_advec05"
+# source="dfm_advec01_nu5e-5"
+# source="dfm_advec01_nux1"
+source="sun_steady_008dt1"
 
 fig_dir="figs-20180707-%s"%source
 os.path.exists(fig_dir) or os.mkdir(fig_dir)
-
 
 if source=='adcp':
     # Data from each set of repeats is in a single folder
@@ -133,15 +137,7 @@ elif source.startswith('dfm'):
         # older run with 33 advection but higher viscosity
         run_name='hor_003'
     else:
-        run_name='hor_005'
-        if source=='dfm_advec00':
-            run_name+='_advec00'
-        elif source=='dfm_advec01':
-            run_name+='_advec01'
-        elif source=='dfm_advec02':
-            run_name+='_advec02'
-        else:
-            raise Exception("Need to configure source=%s"%source)
+        run_name=source.replace('dfm','hor_005')
 
     dfm_map=xr.open_dataset(
         ('../../'
@@ -169,12 +165,74 @@ elif source.startswith('dfm'):
         return os.path.join(fig_dir,transect[1])
     def ds_to_adcpy(ds):
         return transect_to_adcpy.ADCPXrTransectData(ds=ds)
+elif source.startswith('sun'):
+    from stompy.model.suntans import sun_driver
+    six.moves.reload_module(sun_driver)
+
+    # for now, pull transect xy from the existing untrim sections
+    hydro_txt_fn="../../model/untrim/ed-steady/section_hydro.txt"
+    names=xr_transect.section_hydro_names(hydro_txt_fn)
+
+    run_name=source
+    run_path=source.replace('sun_','../../model/suntans/runs/')
+    sun_model=sun_driver.SuntansModel.load(os.path.join(run_path,'suntans.dat'))
+
+    nc_fns=sun_model.map_outputs()
+
+    ncs=[xr.open_dataset(fn) for fn in nc_fns]
+    transects=[ (hydro_txt_fn,name,sun_model) for name in names]
+
+    def read_transect(transect):
+        hydro_txt_fn,section_name,sun_model=transect
+        untrim_ds=xr_transect.section_hydro_to_transect(hydro_txt_fn,section_name)
+        line_xy=np.c_[untrim_ds.x_sample.values,untrim_ds.y_sample.values]
+
+        ds=sun_model.extract_transect(time=-1,xy=line_xy,dx=3)
+
+        xy=np.c_[ds.x_sample.values,ds.y_sample.values]
+
+        ll=proj_utils.mapper("EPSG:26910","WGS84")(xy)
+        ds['lon']=('sample',),ll[:,0]
+        ds['lat']=('sample',),ll[:,1]
+        ds.attrs['source']=source
+        return [ds]
+    def get_tran_fig_dir(transect):
+        return os.path.join(fig_dir,transect[1])
+    def ds_to_adcpy(ds):
+        return transect_to_adcpy.ADCPXrTransectData(ds=ds)
+
+# #
+if 0: # dev for extracting suntans transect
+    xy=np.array([[ 647108.115171, 4185823.198717],
+                 [ 647107.508217, 4185826.136677],
+                 [ 647106.901263, 4185829.074637],
+                 [ 647106.294309, 4185832.012596],
+                 [ 647105.687355, 4185834.950556],
+                 [ 647105.080401, 4185837.888516],
+                 [ 647104.473447, 4185840.826475],
+                 [ 647103.866493, 4185843.764435],
+                 [ 647103.259539, 4185846.702394],
+                 [ 647102.652585, 4185849.640354],
+                 [ 647102.045631, 4185852.578314],
+                 [ 647101.438677, 4185855.516273],
+                 [ 647100.831723, 4185858.454233],
+                 [ 647100.224769, 4185861.392193],
+                 [ 647099.617815, 4185864.330152],
+                 [ 647099.010862, 4185867.268112]])
+    transect=sun_model.extract_transect(time=-1,xy=xy)
+
+    from stompy import xr_transect
+    plt.figure(2).clf()
+    fig,ax=plt.subplots(num=2)
+    xr_transect.plot_scalar_polys(transect,transect.Ve)
+
+##
 
 # dss=read_transect(transects[12])
 # A=ds_to_adcpy(dss[0])
 # print(xr_transect.Qleft(dss[0]))
 
-##
+#
 
 transect_xy_fn=os.path.join(fig_dir,'transects-xy.csv')
 os.path.exists(transect_xy_fn) and os.unlink(transect_xy_fn)
@@ -211,7 +269,7 @@ for transect in transects:
         # pull dimensions from ds, distances from vector product
         return ds.x_sample*0 + np.dot(xy-xy0,across_unit)
 
-    if 1: # Plan view quiver of each individual repeat
+    if 0: # Plan view quiver of each individual repeat
         for repeat,ds in enumerate(tran_dss):
             fig=plt.figure(2)
             fig.clf()
@@ -442,6 +500,9 @@ for transect in transects:
             tran_avg=trans[0] # doesn't work -- some error in ADCPy.
 
         roz_tran=adcpy_recipes.transect_rotate(tran_avg,rotation='Rozovski')
+        fig=plt.figure(4)
+        fig.clf()
+        fig.set_size_inches((10,8),forward=True)
         fig=adcpy.plot.plot_flow_summary(roz_tran,fig=4)
 
         map_ax,u_ax,u_cax,v_ax,v_cax = fig.axes
@@ -455,7 +516,10 @@ for transect in transects:
         bathy().plot(ax=map_ax,cmap='gray',vmin=-20,vmax=6,
                      offset=[-np.nanmin(np.nanmin(roz_tran.xy[:,0])),
                              -np.nanmin(np.nanmin(roz_tran.xy[:,1]))])
-        fig.savefig(os.path.join(tran_fig_dir,'velocity-rozovski.png'))
+        # fig.savefig(os.path.join(tran_fig_dir,'velocity-rozovski.png'))
+
+        tran_name=os.path.basename(tran_fig_dir)
+        fig.savefig(os.path.join(fig_dir,'rozovski-%s-%s.png'%(source,tran_name)))
 
         with open(transect_xy_fn,'at') as fp:
             np.savetxt(fp,tran_avg.xy,delimiter=',')
@@ -484,6 +548,33 @@ if 1:
     ax.axis(zoom_overview)
     fig.savefig(os.path.join(fig_dir,"all_transects_map.png"))
 
+##
+
+# Seem to have broken untrim transects.
+transect=transects[2]
+tran_dss=read_transect(transect)
+
+from adcpy import adcpy, adcpy_recipes
+# Show secondary circulation based on ADCPy
+# Note that adcpy wants z to be positive down, starting at the surface.
+# I may have changed the untrim code to have z_ctr positive up,
+# and layers from bed to surface
+
+print("xr_transects num valid: ",np.sum( np.isfinite(tran_dss[0].Ve.values)))
+
+# Testing to make sure it is failing with current arrangement
+# atran=ds_to_adcpy(tran_dss[0])
+# the above just wraps this:
+ds=tran_dss[0].copy(deep=True)
+
+# The problem is somewhere in xr_transect.resample_z
+#import pdb
+#pdb.run("atran=transect_to_adcpy.ADCPXrTransectData(ds=ds)")
+atran=transect_to_adcpy.ADCPXrTransectData(ds=ds)
+
+# What if I muck with the coordinates
+
+print("ADCPy result num valid: ",np.sum( np.isfinite(atran.velocity)))
 ##
 
 # Okay - seems like bottom track was thrown off by a bad initial position,

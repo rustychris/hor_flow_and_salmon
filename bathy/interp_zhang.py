@@ -23,6 +23,9 @@ dem=bathy.dem()
 ##
 
 class InterpZhang(object):
+    idw_L=2.0 # length scale for inverse distance weighting
+    idw_k=2.  # inverse power for inverse distance weighting
+
     def __init__(self,g,u,v,clip=None,**kwargs):
         """
         g: UnstructuredGrid on which velocity is specified
@@ -34,28 +37,35 @@ class InterpZhang(object):
 
         if clip is None:
             clip=g.bounds()
-        self.clip=clip
+
+        # convoluted, but this helps round trip the right raster
+        # coordinates
+        self.clip=[clip[0]-self.dx/2,clip[1]+self.dx/2,
+                   clip[2]-self.dy/2,clip[3]+self.dy/2]
 
         self.g=g
         self.uv=np.c_[u,v]
 
         self.build_net()
         self.set_velocity_on_net()
-        self.calc_Td()
+        self.t_net.edges['Td'] = self.calc_Td()
 
     def calc_Td(self):
+        Ne=self.t_net.Nedges()
+        Td=np.zeros(Ne,np.float64)
+
         eps=1e-5
-        for j in range(self.t_net.Nedges()):
+        for j in range(Ne):
             if j%10000==0:
-                print("%d/%d"%(j,self.t_net.Nedges()))
+                print("%d/%d"%(j,Ne))
             n1,n2=nodes=self.t_net.edges['nodes'][j]
             xy=self.t_net.nodes['x'][nodes]
             dx,dy=xy[1,:] - xy[0,:]
             u=self.t_net.nodes['u'][nodes].sum()
             v=self.t_net.nodes['v'][nodes].sum()
 
-            self.t_net.edges['Td'][j]=self.calc_Td_single(j,u,v,dx,dy)
-
+            Td[j]=self.calc_Td_single(j,u,v,dx,dy)
+        return Td
     def calc_Td_single(self,j,u,v,dx,dy):
         # can't drop signs until here, otherwise we lose quadrant information
         # doing it here also allows for protecting against division by zero.
@@ -64,7 +74,7 @@ class InterpZhang(object):
             Tab=(2*(dx**2 +dy**2))/u_tan
         else:
             Tab=np.nan
-        self.t_net.edges['Td'][j]=Tab
+        return Tab
 
     def set_samples(self,xyz_input):
         """
@@ -114,20 +124,35 @@ class InterpZhang(object):
             elif (self.t_net.nodes['u'][n]==0) and (self.t_net.nodes['v'][n]==0):
                 continue # not wet in the model, or still water.
 
-            # search from n along edges of t_net, with cost Td,
-            # finding the search_n nearest samples.n
-            results=self.t_net.shortest_path(n,samples,edge_weight=lambda j:self.t_net.edges['Td'][j],
-                                             return_type='cost',max_return=self.search_n)
-            r_nodes,r_costs = zip(*results) # "transpose" results
-            r_nodes=list(r_nodes) # tuple causes problems, make it a list.
-            result_values=self.t_net.nodes['value'][r_nodes]
-            assert np.all( np.isfinite(result_values) )
-            weights=1./np.array(r_costs)
-            weights/=weights.sum()
-            new_values[n]=(weights*result_values).sum()
+            new_values[n] = self.interpolate_single(n,samples)
 
         self.t_net.add_node_field('int_value',new_values,on_exists='overwrite')
+    def interpolate_single(self,n,samples):
+        """
+        compute interpolated value for node n, based on self.t_net_nodes['value']
+        for nodes in the set samples (bool mask).
+        """
+        results=self.neighbors_single(n,samples)
+        if len(results)==0:
+            return np.nan
 
+        r_nodes,r_costs = zip(*results) # "transpose" results
+        r_nodes=list(r_nodes) # tuple causes problems, make it a list.
+        result_values=self.t_net.nodes['value'][r_nodes]
+        assert np.all( np.isfinite(result_values) )
+
+        # weights=(self.idw_L+np.array(r_costs))**(-self.idw_k)
+        # follow Ed's advice on hard clipping distance.
+        weights=(np.array(r_costs).clip(self.idw_L,np.inf))**(self.idw_k)
+        weights/=weights.sum()
+        return (weights*result_values).sum()
+
+    def neighbors_single(self,n,samples):
+        """
+        Find the neighbors for node n, amongst bitmask samples.
+        """
+        return self.t_net.shortest_path(n,samples,edge_weight=lambda j:self.t_net.edges['Td'][j],
+                                        return_type='cost',max_return=self.search_n)
 
 class InterpZhangDual(InterpZhang):
     def build_net(self):
@@ -205,7 +230,7 @@ class InterpZhangDual(InterpZhang):
             self.t_net.nodes['value'][n] = xyz_input[:,2][hits].mean()
 
 
-class InterZhangCartesian(InterpZhang):
+class InterpZhangCartesian(InterpZhang):
     dx=5.0
     dy=5.0
 
@@ -317,6 +342,55 @@ class InterZhangCartesian(InterpZhang):
                             F=raster_values)
         return f
 
+class InterpZhangCartesianBidir(InterpZhangCartesian):
+    """
+    Td is calculated as a signed quantity, with positive meaning
+    that flow is going edges['nodes'][0] to edges['nodes'][1],
+    and negative the opposite.
+    """
+    def __init__(self,*a,**kw):
+        super(InterpZhangCartesianBidir,self).__init__(*a,**kw)
+
+    def calc_Td_single(self,j,u,v,dx,dy):
+        # For bidirectional, keep the sign here.
+        # dx and dy are signed and represent the natural direction
+        # of the edge
+        u_tan=u*dx+v*dy
+
+        if u_tan!=0.0:
+            Tab=(2*(dx**2 +dy**2))/u_tan
+        else:
+            Tab=np.nan
+        return Tab
+
+    def neighbors_single(self,n,samples):
+        """
+        Return list of neighboring samples for node n, as list
+        of [(n,cost),...]
+        """
+        # search from n along edges of t_net, with cost Td,
+        # finding the search_n nearest samples.n
+        def fwd_weight(j,dir):
+            Td=dir*self.t_net.edges['Td'][j]
+            if Td>=0:
+                return Td
+            else:
+                return np.nan
+
+        def rev_weight(j,dir):
+            Td=-dir*self.t_net.edges['Td'][j]
+            if Td>=0:
+                return Td
+            else:
+                return np.nan
+
+        results_fwd=self.t_net.shortest_path(n,samples,edge_weight=fwd_weight,directed=True,
+                                             return_type='cost',max_return=self.search_n//2)
+        results_rev=self.t_net.shortest_path(n,samples,edge_weight=rev_weight,directed=True,
+                                             return_type='cost',max_return=self.search_n//2)
+
+        # results are lists of (n,cost)
+        return results_fwd+results_rev  # concatenate
 
 ##
 
@@ -363,14 +437,27 @@ if 0:
                        clip=(646966, 647602, 4185504, 4186080))
     iz.set_samples(xyz_input)
     iz.interpolate()
-else:
-    iz=InterZhangCartesian(g,
-                           u=ds.ucxa.values,
-                           v=ds.ucya.values,
-                           clip=(646966, 647602, 4185504, 4186080),
-                           dx=2,dy=2)
+if 0:
+    iz=InterpZhangCartesian(g,
+                            u=ds.ucxa.values,
+                            v=ds.ucya.values,
+                            clip=(646966, 647602, 4185504, 4186080),
+                            dx=2,dy=2)
 
     iz_search_n=40 # 8 was not enough. 20 wasn't enough either.
+    iz.set_samples(xyz_input)
+    iz.interpolate()
+if 1:
+    iz=InterpZhangCartesianBidir(g,
+                                 u=ds.ucxa.values,
+                                 v=ds.ucya.values,
+                                 clip=(646966, 647602, 4185504, 4186080),
+                                 dx=2,dy=2)
+    # this really shouldn't be too high -- high numbers behave poorly
+    # near boundaries, since there aren't enough good samples in
+    # one of the directions
+    iz.idw_L=3
+    iz.search_n=10
     iz.set_samples(xyz_input)
     iz.interpolate()
 
@@ -383,8 +470,6 @@ cell_values[iz.t_net.nodes['dual_cell']]=iz.t_net.nodes['int_value']
 
 plt.figure(11).clf()
 fig,ax=plt.subplots(num=11)
-
-# iz.g.plot_edges(color='k',lw=0.2,clip=clip)
 ccoll=iz.t_dual.plot_cells(values=cell_values,
                            mask=np.isfinite(cell_values),clip=clip,cmap=cmap,ax=ax)
 ccoll.set_clim([-8,3])
@@ -396,22 +481,111 @@ ax.axis('equal')
 
 ax.axis( (646917., 647721, 4185492., 4186106.) )
 
-# The cartesian results look significantly worse.  Is velocity getting on the
-# grid properly?
-# fig.savefig('zhang-on-grid.png')
-# fig.savefig('zhang-on-grid-cluster.png')
-
 ##
 
 f=iz.as_raster()
-f.write_gdal("zhang-dem.tif")
+# f.write_gdal("zhang-dem-bidir.tif")
+# f.write_gdal("zhang-dem.tif")
+
+# at least the bidirectional approach sufferrs from too-high
+# a search_n.  Since it doesn't need a large number of samples
+# to force a look both ways, a high number means that it's
+# more likely to pick up lateral samples, particularly in sparse
+# areas.
+
+##
+
+fig=plt.figure(12)
+fig.clf()
+ax=fig.add_subplot(1,1,1)
+
+img=f.plot(ax=ax,cmap=cmap)
+
+# f.plot_hillshade(z_factor=4,ax=ax)
+
+iz.t_net.plot_nodes(mask=samples,color='k',ax=ax,alpha=0.3)
+
+ax.axis( (647100, 647213, 4185804., 4185891.) )
 
 ##
 
 # is it possible to search downstream and upstream separately?
 # then we choose search_n/2 samples from downstream, search_n/2
 # from upstream, and run IDW on the combined set?
-# this means changing 
 
+# something is a little off - there is odd vertical striping now.
 
+fig=plt.figure(13)
+fig.clf()
+ax=fig.add_subplot(1,1,1)
 
+#f.plot(ax=ax,cmap=cmap)
+
+#p=[647403, 4185689]
+#p=[647560.8638027328, 4185545.21409829]
+p=[647133, 4185860]
+n=iz.t_net.select_nodes_nearest(p)
+
+iz.t_net.plot_nodes(mask=[n],color='m',ax=ax)
+
+# See which samples it uses:
+self=iz
+samples=np.nonzero( np.isfinite(self.t_net.nodes['value']) )[0]
+#--
+if 1:
+    def fwd_weight(j,dir):
+        Td=dir*self.t_net.edges['Td'][j]
+        if Td>=0:
+            return Td
+        else:
+            return np.nan
+
+    def rev_weight(j,dir):
+        Td=-dir*self.t_net.edges['Td'][j]
+        if Td>=0:
+            return Td
+        else:
+            return np.nan
+
+    results_fwd=self.t_net.shortest_path(n,samples,edge_weight=fwd_weight,directed=True,
+                                         return_type='cost',max_return=self.search_n//2)
+    results_rev=self.t_net.shortest_path(n,samples,edge_weight=rev_weight,directed=True,
+                                         return_type='cost',max_return=self.search_n//2)
+
+# results are lists of (n,cost)
+results=results_fwd+results_rev  # concatenate
+
+r_nodes,r_costs = zip(*results) # "transpose" results
+r_nodes=list(r_nodes) # tuple causes problems, make it a list.
+result_values=self.t_net.nodes['value'][r_nodes]
+
+iz.t_net.plot_nodes(mask=samples,color='k',ax=ax,alpha=0.3)
+all_values=np.zeros(iz.t_net.Nnodes())
+all_values[r_nodes]=r_costs
+iz.t_net.plot_nodes(mask=r_nodes,values=all_values,ax=ax,cmap='jet',sizes=40)
+
+# the forward samples are wrong, all in a column
+zoom=(647338, 647453, 4185619, 4185735)
+# zoom=(647398, 647408, 4185684, 4185691)
+
+ax.axis(zoom)
+##
+# bidirectional is working.
+# though it is now more speckled?
+
+##
+
+# What about keeping track of the location of the samples more?
+#  so as we traverse the network to find samples, rather than just
+# summing up per-edge distances, we sum vectors with respect to
+# the local velocity / ellipse
+# so each sample comes back not with just a distance, but instead
+# with a measure that we went 10 units parallel, and 2 units
+# to the right?
+
+# pros: less diffusion by grid
+# cons: could end up side stepping an area?
+#       probably some deeper issues
+#   is the distance field continuous? yes.  smooth?
+#     maybe not.  there might be two distinct paths from n to a
+#     particular node, leading to ridges.
