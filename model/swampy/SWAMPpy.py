@@ -20,6 +20,7 @@ import time
 import h5py
 from matplotlib.collections import PolyCollection
 from scipy.spatial.distance import euclidean
+from stompy import utils
 from stompy.grid import unstructured_grid as ugrid
 
 import matplotlib.pyplot as plt
@@ -30,20 +31,25 @@ import scipy.sparse as sparse
 g = 9.8  # gravity
 dc_min = 1.0
 max_sides = 8
-dzmin = 0.0001
+dzmin = 0.01 # RH: was much smaller.
 flow_contract_threshold = 100000.01  # 0.01
 
+class SwampyCore(object):
+    use_contract_factor=False
+    # tolerance for conjugate gradient
+    cg_tol=1.e-12
 
-class SWAMPpy(object):
-    def __init__(self,
-                 dt=0.025,
-                 dx=1.0):
+    def __init__(self,dt=0.025):
         self.dt = dt
-        self.dx = dx
+        self.bcs=[]
+    def add_bc(self,bc):
+        self.bcs.append(bc)
 
     def center_vel_perot(self, i, cell_uj):
         """
         Cell center velocity calculated with Perot dual grid interpolation
+        return u center veloctiy vector, {x,y} components, based on
+        edge-normal velocities in cell_uj.
         """
         acu = np.zeros(2, np.float64)
         uside = np.zeros_like(acu)
@@ -111,10 +117,11 @@ class SWAMPpy(object):
         ui = np.zeros((self.ncells, 2), np.float64)
         for i in range(self.ncells):
             nsides = self.ncsides[i]
-            cell_uj = np.zeros(nsides, np.float64)
-            for l in range(nsides):
-                j = self.grd.cells[i]['edges'][l]
-                cell_uj[l] = uj[j]
+            #cell_uj = np.zeros(nsides, np.float64)
+            #for l in range(nsides):
+            #    j = self.grd.cells[i]['edges'][l]
+            #    cell_uj[l] = uj[j]
+            cell_uj=uj[ self.grd.cells['edges'][i,:nsides] ]
             ui[i] = self.center_vel_perot(i, cell_uj)
 
         return ui
@@ -228,33 +235,56 @@ class SWAMPpy(object):
         hjstar = np.zeros(self.nedges)
         for j in self.intern:
             ii = self.grd.edges[j]['cells']
+            # if uj[j] > 0:
+            #     e_up = ei[ii[0]]
+            # elif uj[j] < 0:
+            #     e_up = ei[ii[1]]
+            # else:
+            #     e_up = max(ei[ii[0]], ei[ii[1]])
+            # # RH: don't let this go negative
+            # hjstar[j] = max(0, min(zi[ii[0]], zi[ii[1]]) + e_up )
+
+            #  If this is supposed to follow Stelling eq 8.5,
             if uj[j] > 0:
-                e_up = ei[ii[0]]
+                hjstar[j]=self.hi[ii[0]]
             elif uj[j] < 0:
-                e_up = ei[ii[1]]
+                hjstar[j]=self.hi[ii[1]]
             else:
-                e_up = max(ei[ii[0]], ei[ii[1]])
-            hjstar[j] = min(zi[ii[0]], zi[ii[1]]) + e_up
+                hjstar[j]= max(ei[ii[0]], ei[ii[1]]) + min(zi[ii[0]], zi[ii[1]])
+
+        neg=hjstar<0
+        if np.any(neg):
+            print("%d edges had negative hjstar"%neg.sum())
+            hjstar[neg]=0.0
 
         return hjstar
 
     def calc_hjbar(self, ei, zi):
         """
         Calculate depth at a face
+        (linear interpolation from depth in adjacent cells)
         """
         hjbar = np.zeros(self.nedges)
         for j in self.intern:  # loop over internal edges
             ii = self.grd.edges[j]['cells']  # 2 cells
-            # esg - could use hi directly instead of recalculating
-            hL = ei[ii[0]] + zi[ii[0]]
-            hR = ei[ii[1]] + zi[ii[1]]
-            hjbar[j] = self.alpha[j][0] * hL + self.alpha[j][1] * hR
+            if 0: # Older code
+                # esg - could use hi directly instead of recalculating
+                hL = ei[ii[0]] + zi[ii[0]]
+                hR = ei[ii[1]] + zi[ii[1]]
+                # RH: don't let this go negative.  
+                hjbar[j] = max(0, self.alpha[j][0] * hL + self.alpha[j][1] * hR )
+            else:
+                # RH  - hi is already limited to non-negative
+                hL=self.hi[ii[0]]
+                hR=self.hi[ii[1]]
+                hjbar[j] = self.alpha[j][0] * hL + self.alpha[j][1] * hR
 
         return hjbar
 
     def calc_hjtilde(self, ei, zi):
         """
         Calculate depth at a face
+        (with average cell eta, and interpolated cell bed)
         """
         hjtilde = np.zeros(self.nedges)
         for j in self.intern:  # loop over internal edges
@@ -262,10 +292,445 @@ class SWAMPpy(object):
             eavg = 0.5 * (ei[ii[0]] + ei[ii[1]])
             bL = zi[ii[0]]
             bR = zi[ii[1]]
-            hjtilde[j] = eavg + self.alpha[j][0] * bL + self.alpha[j][1] * bR
+            # RH: don't let this go negative
+            hjtilde[j] = max(0, eavg + self.alpha[j][0] * bL + self.alpha[j][1] * bR )
 
         return hjtilde
 
+    def set_topology(self):
+        """
+        Use functions of unstructured grid class for remaining topology
+        """
+        self.nedges = self.grd.Nedges()
+        self.ncells = self.grd.Ncells()
+        self.nnodes = self.grd.Nnodes()
+        self.grd.update_cell_edges()
+        self.grd.update_cell_nodes()
+        self.grd.edge_to_cells()
+        self.grd.cells_area()
+        self.grd.cells['_center'] = self.grd.cells_centroid()
+        self.grd.edges['mark'] = 0  # default is internal cell
+        self.extern = np.where(np.min(self.grd.edges['cells'], axis=1) < 0)[0]
+        self.grd.edges['mark'][self.extern] = 1  # boundary edge
+        self.intern = np.where(self.grd.edges['mark'] == 0)[0]
+        self.nedges_intern = len(self.intern)  # number of internal edges
+        self.exy = self.grd.edges_center()
+        self.en = self.grd.edges_normals()
+        self.len = self.grd.edges_length()
+        # number of valid sides for each cell
+        self.ncsides = np.asarray([sum(jj >= 0) for jj in self.grd.cells['edges']])
+
+        return
+
+    def get_cell_center_spacings(self):
+        """
+        Return cell center spacings
+        Spacings for external edges are set to dc_min (should not be used)
+        """
+        dc = dc_min * np.ones(self.nedges, np.float64)
+        if 0:
+            for j in self.intern:
+                ii = self.grd.edges[j]['cells']  # 2 cells
+                xy = self.grd.cells[ii]['_center']  # 2x2 array
+                dc[j] = euclidean(xy[0], xy[1])  # from scipy
+        else:
+            # vectorize
+            i0=self.grd.edges['cells'][self.intern,0]
+            i1=self.grd.edges['cells'][self.intern,1]
+            dc[self.intern] = utils.dist( self.grd.cells['_center'][i0],
+                                          self.grd.cells['_center'][i1] )
+        self.dc = dc
+
+        return dc
+
+    def edge_to_cen_dist(self):
+        dist = np.zeros((self.ncells, max_sides), np.float64)
+        for i in range(self.ncells):
+            cen_xy = self.grd.cells['_center'][i]
+            nsides = self.ncsides[i]
+            for l in range(nsides):
+                j = self.grd.cells[i]['edges'][l]
+                side_xy = self.exy[j]
+                #dist[i, l] = euclidean(side_xy, cen_xy)  # from scipyw
+                dist[i, l] = utils.dist(side_xy, cen_xy) # faster?
+
+        return dist
+
+    def get_alphas_Perot(self):
+        """
+        Return Perot weighting coefficients
+        Coefficients for external edges are set to zero (should not be used)
+        """
+        if 0:
+            alpha = np.zeros((self.nedges, 2), np.float64)
+            for j in self.intern:
+                side_xy = self.exy[j]
+                ii = self.grd.edges[j]['cells']
+                cen_xyL = self.grd.cells['_center'][ii[0]]
+                cen_xyR = self.grd.cells['_center'][ii[1]]
+                alpha[j, 0] = euclidean(side_xy, cen_xyL) / self.dc[j]
+                alpha[j, 1] = euclidean(side_xy, cen_xyR) / self.dc[j]
+            self.alpha = alpha
+        else: # vectorized
+            alpha = np.zeros((self.nedges, 2), np.float64)
+            i0=self.grd.edges['cells'][self.intern,0]
+            i1=self.grd.edges['cells'][self.intern,1]
+            cen_xyL = self.grd.cells['_center'][i0]
+            cen_xyR = self.grd.cells['_center'][i1]
+            alpha[self.intern, 0] = utils.dist(self.exy[self.intern], cen_xyL) / self.dc[self.intern]
+            alpha[self.intern, 1] = utils.dist(self.exy[self.intern], cen_xyR) / self.dc[self.intern]
+            self.alpha = alpha
+
+        return alpha
+
+    def get_alphas_Wenneker(self):
+        """
+        Return Wenekker weighting coefficients
+        Coefficients for external edges are set to zero (should not be used)
+        """
+        alpha = np.zeros((self.nedges, 2), np.float64)
+        for j in self.intern:
+            ii = self.grd.edges[j]['cells']
+            Al = self.grd.cells['_area'][ii[0]]
+            Ar = self.grd.cells['_area'][ii[1]]
+            alpha[j, 0] = Al / (Al + Ar)
+            alpha[j, 1] = Ar / (Al + Ar)
+        self.alpha = alpha
+
+        return alpha
+
+    def get_sign_array(self):
+        """
+        Sign array for all cells, for all edges
+        Positive if face normal is pointing out of cell
+        """
+        sil = np.zeros((self.ncells, max_sides), np.float64)
+        for i in range(self.ncells):
+            for l in range(self.ncsides[i]):
+                j = self.grd.cells[i]['edges'][l]
+                ii = self.grd.edges[j]['cells']  # 2 cells
+                sil[i, l] = (ii[1] - 2 * i + ii[0]) / (ii[1] - ii[0])
+
+        return sil
+
+    def get_side_num_of_cell(self):
+        """
+        Sparse matrix of local side number (0,1,2,or 3) for each cell, for each edge
+        """
+        lij = -1 * np.ones((self.ncells, self.nedges), np.int32)
+        for i in range(self.ncells):
+            for l in range(self.ncsides[i]):
+                j = self.grd.cells[i]['edges'][l]
+                lij[i, j] = l
+
+        return lij
+
+    def set_initial_conditions(self):
+        """
+        Subclasses or caller can specialize this.  Here we just allocate
+        the arrays
+        """
+        # Initial free surface elevation, positive up
+        self.ic_ei = np.zeros(self.ncells, np.float64)
+        # Bed elevation, positive down
+        self.ic_zi = np.zeros_like(self.ic_ei)
+
+        # other contenders:
+        # self.ds_i  index array for cell BCs on downstream end
+        # self.us_i  index array for cell BCs on upstream end
+        # self.us_j  index array for edge BCs on upstream end
+        # need to refactor BC code
+
+    def run(self, tend):
+        """
+        Run simulation
+        """
+        dt = self.dt
+        self.tend = tend
+        self.t=0.0 # for now, always start at 0.
+        nsteps = np.int(np.round(tend / dt))
+
+        # precompute constants
+        gdt2 = g * dt * dt
+        dc = self.get_cell_center_spacings()
+        self.dist = self.edge_to_cen_dist()
+        alpha = self.get_alphas_Perot()
+
+        sil = self.get_sign_array()
+        # lij = self.get_side_num_of_cell()
+
+        # edge length divided by center spacing
+        len_dc_ratio = np.divide(self.len, dc)
+
+        # cell center values
+        ncells = self.ncells
+        self.hi = hi = np.zeros(ncells, np.float64)  # total depth
+        self.zi = zi = np.zeros_like(hi)  # bed elevation, measured positive down
+        self.ei = ei = np.zeros_like(hi)  # water surface elevation
+        # edge values
+        self.uj = uj = np.zeros(self.nedges, np.float64)  # normal velocity at side
+        self.qj = qj = np.zeros(self.nedges, np.float64)  # normal velocity*h at side
+        # Matrix
+        # A = np.zeros((ncells, ncells), np.float64)
+        # Allocate below as sparse
+        b = np.zeros(ncells, np.float64)
+        # short vars for grid
+        self.area = area = self.grd.cells['_area']
+
+        # set initial conditions
+        zi[:] = self.ic_zi[:]
+        ei[:] = self.ic_ei[:] # RH: does this need to be propped up to at least -zi?
+        # still unstable
+        ei[:] = np.maximum( ei,-self.zi ) # RH: try propping it up..
+
+        self.hi[:] = (zi + ei).clip(0,np.inf)  # update total depth
+        hjstar = self.calc_hjstar(ei, zi, uj)
+        hjbar = self.calc_hjbar(ei, zi)
+        hjtilde = self.calc_hjtilde(ei, zi)
+        use_contract_factor=self.use_contract_factor
+
+        eta_cells={}
+        for bc in self.bcs:
+            if isinstance(bc,StageBC):
+                for c in bc.cells(self):
+                    eta_cells[c]=bc # doesn't matter what the value is
+        print("Total of %d stage BC cells"%len(eta_cells))
+
+        # change code to vector operations at some point
+        # time stepping loop
+        tvol = np.zeros(nsteps)
+        for n in range(nsteps):
+            self.t=n*dt # update model time
+            print('step %d/%d  t=%.3fs'%(n+1,nsteps,self.t))
+
+            # calculate advection term
+            fu = self.get_fu_no_adv(uj)
+            # fu = self.get_fu_orig(uj)
+            # fu = self.get_fu_Perot(uj, alpha, sil, hi, hjstar, hjbar, hjtilde, use_contract_factor)
+
+            # set matrix coefficients
+            # first put one on diagonal, and explicit stuff on rhs (b)
+            # A[:, :] = 0.
+            A=sparse.dok_matrix((ncells,ncells), np.float64)
+            b[:] = 0.
+
+            # coo_matrix is faster than dok_matrix.
+            # tally row, col, data in these lists.
+            rows=[]
+            cols=[]
+            data=[]
+
+            for i in range(ncells):
+                # A[i, i] = 1.0
+                on_diag=1.0
+                if i in eta_cells:
+                    # leave diagonal as 1.0
+                    pass # b gets set in apply_bc
+                else:
+                    s_len_h_u_sum = 0.0
+                    for l in range(self.ncsides[i]):
+                        j = self.grd.cells[i]['edges'][l]
+                        if self.grd.edges[j]['mark'] == 0:  # if internal
+                            s_len_h_u_sum += sil[i, l] * self.len[j] * hjstar[j] * fu[j]
+                            if hjbar[j] > dzmin:
+                                hterm = hjstar[j] * hjtilde[j] / hjbar[j]
+                            else:
+                                hterm = hjstar[j]
+                            coeff = (gdt2 / area[i]) * len_dc_ratio[j] * hterm
+                            # A[i, i] += coeff
+                            on_diag += coeff
+                            ii = self.grd.edges[j]['cells']  # 2 cells
+                            i2 = ii[np.nonzero(ii - i)[0][0]]  # i2 = index of neighbor
+                            # A[i, i2] = -coeff
+                            rows.append(i)
+                            cols.append(i2)
+                            data.append(-coeff)
+                    b[i] = ei[i] - (dt / area[i]) * s_len_h_u_sum
+                # add the diagonal 
+                rows.append(i)
+                cols.append(i)
+                data.append(on_diag)
+
+            for bc in self.bcs:
+                # with coo matrix, no direct access to A
+                bc.apply_bc(self,A=None,b=b)
+            A=sparse.coo_matrix( (data,(rows,cols)), (ncells,ncells),dtype=np.float64)
+
+            A=A.tocsr()
+
+            # invert matrix
+            start = time.time()
+            ei[:], success = sparse.linalg.cg(A, b, tol=self.cg_tol)  # Decrease tolerance for faster speed
+            end = time.time()
+            print('matrix solve took', '{0:0.4f}'.format(end - start), 'sec')
+            if success != 0:
+                raise RuntimeError('Error in convergence of conj grad solver')
+
+            neg=ei<-self.zi
+            if np.any(neg): # RH: try propping it up..
+                print("%d cells went negative"%neg.sum())
+                ei[neg] = -self.zi[neg]
+                assert not np.any(ei<-self.zi), "what?"
+
+            # Update elevations
+            hi[:] = (zi + ei).clip(0,np.inf)
+
+            # substitute back into u solution
+            for j in self.intern:  # loop over internal cells
+                ii = self.grd.edges[j]['cells']  # 2 cells
+                if hjbar[j] > dzmin:
+                    uj[j] = fu[j] - (hjtilde[j] / hjbar[j]) * (g * dt / dc[j]) * (ei[ii[1]] - ei[ii[0]])
+                elif hjbar[j] > 0:
+                    uj[j] = fu[j] - (g * dt / dc[j]) * (ei[ii[1]] - ei[ii[0]])
+                else:
+                    # RH -- is this legal?  Does it help stability at wetting front?
+                    # shot in the dark
+                    uj[j] = 0.0
+
+                # RH brute force a no-flow out of dry cells clause:
+                # this should not be necessary
+                if (uj[j]>0) and (hi[ii[0]]==0.0):
+                    uj[j]=0.0
+                elif (uj[j]<0) and (hi[ii[1]]==0.0):
+                    uj[j]=0.0
+
+            self.hjstar = hjstar = self.calc_hjstar(ei, zi, uj)
+            self.hjbar = hjbar = self.calc_hjbar(ei, zi)
+            self.hjtilde = hjtilde = self.calc_hjtilde(ei, zi)
+
+            # conservation properties
+            tvol[n] = np.sum(hi * self.grd.cells['_area'][:])
+
+            self.step_output(n=n,ei=ei,uj=uj)
+
+        return hi, uj, tvol, ei
+
+    def get_edge_x_vel(self, uj):
+        """
+        Return x direction velocity and location at cell edge midpoints
+        """
+        xe = np.zeros(self.nedges_intern)
+        uxe = np.zeros_like(xe)
+        for idx, j in enumerate(self.intern):
+            xe[idx] = self.exy[j][0]  # x coordinate
+            uxe[idx] = uj[j] * self.en[j][0]
+
+        return xe, uxe
+
+    def get_xsect_avg_val(self, eta_i):
+        """
+        Return cross-sectionally averaged x velocities for non-uniform grids
+        """
+        xc = []
+        uxc = []
+        nx = self.domain_length / self.dx
+        for i in range(int(nx)):
+            startx = float(i) * self.dx
+            endx = float(i + 1) * self.dx
+            midx = (float(i) + 0.5) * self.dx
+            d = (self.grd.cells['_center'][:, 0] > startx) & (self.grd.cells['_center'][:, 0] < endx)
+            if np.sum(d) > 0:
+                utmp = np.mean(eta_i[d])
+                uxc.append(utmp)
+                xc.append(midx)
+        return (xc, uxc)
+
+    def get_grid_poly_collection(self):
+        """
+        Return list of polygon points useful for 2D plotting
+        """
+        xy = []
+        for i in range(self.ncells):
+            tmpxy = []
+            for l in range(self.ncsides[i]):
+                n = self.grd.cells[i]['nodes'][l]
+                tmp = self.grd.nodes[n]['x']
+                tmpxy.append([tmp[0], tmp[1]])
+            n = self.grd.cells[i]['nodes'][0]
+            tmp = self.grd.nodes[n]['x']
+            tmpxy.append([tmp[0], tmp[1]])
+            xy.append(tmpxy)
+
+        return xy
+
+    def step_output(self,n,ei,**kwargs):
+        pass
+
+# Structuring BCs:
+#   for bump case, currently the code replaces downstream matrix rows
+#   and rhs values with ds_eta value.
+#   and upstream, sets a flow boundary in the rhs.
+
+class BC(object):
+    _cells=None
+    _edges=None
+    geom=None
+    def __init__(self,**kw):
+        utils.set_keywords(self,kw)
+    def update_matrix(self,model,A,b):
+        pass
+    def cells(self,model):
+        if self._cells is None:
+            self.set_elements(model)
+        return self._cells
+    def edges(self,model):
+        if self._edges is None:
+            self.set_elements(model)
+        return self._edges
+    def set_elements(self,model):
+        self._edges=model.grd.select_edges_by_polyline(self.geom)
+        self._cells=model.grd.edges['cells'][self._edges,0]
+        # Really need to filter these out, so that if two edges are selected which have
+        # the same internal cell, we drop one of them.
+        assert len(self._cells)==len(np.unique(self._cells))
+    def plot(self,model):
+        model.grd.plot_edges(color='k',lw=0.5)
+        model.grd.plot_edges(color='m',lw=4,mask=self.edges(model))
+        model.grd.plot_cells(color='m',alpha=0.5,mask=self.cells(model))
+
+class FlowBC(BC):
+    """
+    Represents a flow in m3/s applied across a set of boundary
+    edges
+    """
+    Q=None
+    ramp_time=0.0
+    def apply_bc(self,model,A,b):
+        c=self.cells(model)
+        e=self.edges(model)
+        # assumes that flow boundary eta is same as interior
+        # cell
+        if model.t<self.ramp_time:
+            ramp=model.t/self.ramp_time
+        else:
+            ramp=1.0
+
+        per_edge_A=(model.len[e]*model.hi[c])
+        per_edge_Q=self.Q*per_edge_A/per_edge_A.sum()
+        b[c] += (model.dt / model.area[c]) * per_edge_Q * ramp
+
+class StageBC(BC):
+    h=None
+    def apply_bc(self,model,A,b):
+        c=self.cells(model)
+        # changes to A are no in the loop above in SWAMPY
+        #A[c, :] = 0.
+        #A[c, c] = 1.
+        b[c] = self.h
+
+
+class SWAMPpy(SwampyCore):
+    def __init__(self,dt=0.025,dx=1.0):
+        super(SWAMPpy,self).__init__(dt=dt)
+        self.dx=dx
+
+    def run(self,case=None,tend=None):
+        # compatibility code -- case is used elsewhere to set
+        # use_contract_factor.
+        # and goofy default args to allow skipping case and passing tend by
+        # keyword. meh.
+        assert tend is not None
+        super(SWAMPpy,self).run(tend=tend)
     def make_1D_grid_Cartesian(self, L, show_grid=False):
         """
         Setup unstructured grid for channel 1 cell wide
@@ -474,116 +939,6 @@ class SWAMPpy(object):
 
         return
 
-    def set_topology(self):
-        """
-        Use functions of unstructured grid class for remaining topology
-        """
-        self.nedges = len(self.grd.edges)
-        self.ncells = len(self.grd.cells)
-        self.nnodes = len(self.grd.nodes)
-        self.grd.update_cell_edges()
-        self.grd.update_cell_nodes()
-        self.grd.edge_to_cells()
-        self.grd.cells_area()
-        self.grd.cells['_center'] = self.grd.cells_centroid()
-        self.grd.edges['mark'] = 0  # default is internal cell
-        self.extern = np.where(np.min(self.grd.edges['cells'], axis=1) < 0)[0]
-        self.grd.edges['mark'][self.extern] = 1  # boundary edge
-        self.intern = np.where(self.grd.edges['mark'] == 0)[0]
-        self.nedges_intern = len(self.intern)  # number of internal edges
-        self.exy = self.grd.edges_center()
-        self.en = self.grd.edges_normals()
-        self.len = self.grd.edges_length()
-        # number of valid sides for each cell
-        self.ncsides = np.asarray([sum(jj >= 0) for jj in self.grd.cells['edges']])
-
-        return
-
-    def get_cell_center_spacings(self):
-        """
-        Return cell center spacings
-        Spacings for external edges are set to dc_min (should not be used)
-        """
-        dc = dc_min * np.ones(self.nedges, np.float64)
-        for j in self.intern:
-            ii = self.grd.edges[j]['cells']  # 2 cells
-            xy = self.grd.cells[ii]['_center']  # 2x2 array
-            dc[j] = euclidean(xy[0], xy[1])  # from scipy
-        self.dc = dc
-
-        return dc
-
-    def edge_to_cen_dist(self):
-        dist = np.zeros((self.ncells, max_sides), np.float64)
-        for i in range(self.ncells):
-            cen_xy = self.grd.cells['_center'][i]
-            nsides = self.ncsides[i]
-            for l in range(nsides):
-                j = self.grd.cells[i]['edges'][l]
-                side_xy = self.exy[j]
-                dist[i, l] = euclidean(side_xy, cen_xy)  # from scipy
-
-        return dist
-
-    def get_alphas_Perot(self):
-        """
-        Return Perot weighting coefficients
-        Coefficients for external edges are set to zero (should not be used)
-        """
-        alpha = np.zeros((self.nedges, 2), np.float64)
-        for j in self.intern:
-            side_xy = self.exy[j]
-            ii = self.grd.edges[j]['cells']
-            cen_xyL = self.grd.cells['_center'][ii[0]]
-            cen_xyR = self.grd.cells['_center'][ii[1]]
-            alpha[j, 0] = euclidean(side_xy, cen_xyL) / self.dc[j]
-            alpha[j, 1] = euclidean(side_xy, cen_xyR) / self.dc[j]
-        self.alpha = alpha
-
-        return alpha
-
-    def get_alphas_Wenneker(self):
-        """
-        Return Wenekker weighting coefficients
-        Coefficients for external edges are set to zero (should not be used)
-        """
-        alpha = np.zeros((self.nedges, 2), np.float64)
-        for j in self.intern:
-            ii = self.grd.edges[j]['cells']
-            Al = self.grd.cells['_area'][ii[0]]
-            Ar = self.grd.cells['_area'][ii[1]]
-            alpha[j, 0] = Al / (Al + Ar)
-            alpha[j, 1] = Ar / (Al + Ar)
-        self.alpha = alpha
-
-        return alpha
-
-    def get_sign_array(self):
-        """
-        Sign array for all cells, for all edges
-        Positive if face normal is pointing out of cell
-        """
-        sil = np.zeros((self.ncells, max_sides), np.float64)
-        for i in range(self.ncells):
-            for l in range(self.ncsides[i]):
-                j = self.grd.cells[i]['edges'][l]
-                ii = self.grd.edges[j]['cells']  # 2 cells
-                sil[i, l] = (ii[1] - 2 * i + ii[0]) / (ii[1] - ii[0])
-
-        return sil
-
-    def get_side_num_of_cell(self):
-        """
-        Sparse matrix of local side number (0,1,2,or 3) for each cell, for each edge
-        """
-        lij = -1 * np.ones((self.ncells, self.nedges), np.int32)
-        for i in range(self.ncells):
-            for l in range(self.ncsides[i]):
-                j = self.grd.cells[i]['edges'][l]
-                lij[i, j] = l
-
-        return lij
-
     def set_grid(self, case, domain_length=100., grid_type='1D_Cartesian', show_grid=False):
         """
         Set up grid for simulation
@@ -619,9 +974,14 @@ class SWAMPpy(object):
         """
         Set up initial conditions for simulation
         """
+        # allocates the IC arrays
+        super(SWAMPpy,self).set_initial_conditions()
         # set initial conditions
-        self.ic_ei = np.zeros(self.ncells, np.float64)
-        self.ic_zi = np.zeros_like(self.ic_ei)
+
+        if 'bump' in case:
+            self.use_contract_factor = True
+        else:
+            self.use_contract_factor = False
 
         if case == 'dam_break':
             self.ds_eta = ds_eta
@@ -658,178 +1018,21 @@ class SWAMPpy(object):
                 self.ic_zi[:] = -1.5*np.exp(-((xtmp-500.0)/50.)**2)
         return
 
-    def run(self, case, tend):
+    def step_output(self,n,ei,**kwargs):
         """
-        Run simulation
+        n: timestep
+        ei: freesurface
         """
-        dt = self.dt
-        self.tend = tend
-        nsteps = np.int(np.round(tend / dt))
-
-        # precompute constants
-        gdt2 = g * dt * dt
-        dc = self.get_cell_center_spacings()
-        self.dist = self.edge_to_cen_dist()
-        alpha = self.get_alphas_Perot()
-
-        sil = self.get_sign_array()
-        # lij = self.get_side_num_of_cell()
-
-        # edge length divided by center spacing
-        len_dc_ratio = np.divide(self.len, dc)
-
-        # cell center values
-        ncells = self.ncells
-        hi = np.zeros(ncells, np.float64)  # total depth
-        zi = np.zeros_like(hi)  # bed elevation, measured positive down
-        ei = np.zeros_like(hi)  # water surface elevation
-        # edge values
-        uj = np.zeros(self.nedges, np.float64)  # normal velocity at side
-        qj = np.zeros(self.nedges, np.float64)  # normal velocity*h at side
-        # Matrix
-        A = np.zeros((ncells, ncells), np.float64)
-        b = np.zeros(ncells, np.float64)
-        # short vars for grid
-        area = self.grd.cells['_area']
-
-        # set initial conditions
-        ei[:] = self.ic_ei[:]
-        zi[:] = self.ic_zi[:]
-
-        hi = zi + ei  # update total depth
-        hjstar = self.calc_hjstar(ei, zi, uj)
-        hjbar = self.calc_hjbar(ei, zi)
-        hjtilde = self.calc_hjtilde(ei, zi)
-        if 'bump' in case:
-            use_contract_factor = True
-        else:
-            use_contract_factor = False
-
-        # change code to vector operations at some point
-        # time stepping loop
-        tvol = np.zeros(nsteps)
-        for n in range(nsteps):
-            print('step', n + 1, 'of', nsteps)
-
-            # calculate advection term
-            # fu = self.get_fu_no_adv(uj)
-            # fu = self.get_fu_orig(uj)
-            fu = self.get_fu_Perot(uj, alpha, sil, hi, hjstar, hjbar, hjtilde, use_contract_factor)
-
-            # set matrix coefficients
-            # first put one on diagonal, and explicit stuff on rhs (b)
-            A[:, :] = 0.
-            b[:] = 0.
-            for i in range(ncells):
-                A[i, i] = 1.0
-                s_len_h_u_sum = 0.0
-                for l in range(self.ncsides[i]):
-                    j = self.grd.cells[i]['edges'][l]
-                    if self.grd.edges[j]['mark'] == 0:  # if internal
-                        s_len_h_u_sum += sil[i, l] * self.len[j] * hjstar[j] * fu[j]
-                        if hjbar[j] > dzmin:
-                            hterm = hjstar[j] * hjtilde[j] / hjbar[j]
-                        else:
-                            hterm = hjstar[j]
-                        coeff = (gdt2 / area[i]) * len_dc_ratio[j] * hterm
-                        A[i, i] += coeff
-                        ii = self.grd.edges[j]['cells']  # 2 cells
-                        i2 = ii[np.nonzero(ii - i)[0][0]]  # i2 = index of neighbor
-                        A[i, i2] = -coeff
-                b[i] = ei[i] - (dt / area[i]) * s_len_h_u_sum
-            if 'bump' in case:
-                A[self.ds_i, :] = 0.
-                A[self.ds_i, self.ds_i] = 1.
-                b[self.ds_i] = self.ds_eta
-                b[self.us_i] = b[self.us_i] + (dt / area[self.us_i]) * self.len[self.us_j] * self.qinflow
-
-            # invert matrix
-            start = time.time()
-            ei, success = sparse.linalg.cg(A, b, tol=1.e-12)  # Decrease tolerance for faster speed
-            end = time.time()
-            print('matrix solve took', '{0:0.4f}'.format(end - start), 'sec')
-            if success != 0:
-                raise RuntimeError('Error in convergence of conj grad solver')
-
-            hi = zi + ei
-            # substitute back into u solution
-            for j in self.intern:  # loop over internal cells
-                ii = self.grd.edges[j]['cells']  # 2 cells
-                if hjbar[j] > dzmin:
-                    uj[j] = fu[j] - (hjtilde[j] / hjbar[j]) * (g * dt / dc[j]) * (ei[ii[1]] - ei[ii[0]])
-                else:
-                    uj[j] = fu[j] - (g * dt / dc[j]) * (ei[ii[1]] - ei[ii[0]])
-
-            # Update elevations
-            hi = ei + zi
-            hjstar = self.calc_hjstar(ei, zi, uj)
-            hjbar = self.calc_hjbar(ei, zi)
-            hjtilde = self.calc_hjtilde(ei, zi)
-
-            # conservation properties
-            tvol[n] = np.sum(hi * self.grd.cells['_area'][:])
-
-            if n % 100 == 0:
-                # Comparison plot
-                fig = plt.figure()
-                ax = fig.add_subplot(111)
-                ax.plot(self.grd.cells['_center'][:, 0], ei, 'r.', ms=2, label='model')
-                ax.plot(self.grd.cells['_center'][:, 0], -self.ic_zi, '-k', label='bed')
-                ax.set_ylabel('Water Surface Elevation, m')
-                ax.legend(loc='upper right')
-                plt.savefig(str(n) + '.png', bbox_inches='tight')
-                plt.close('all')
-
-        return hi, uj, tvol, ei
-
-    def get_edge_x_vel(self, uj):
-        """
-        Return x direction velocity and location at cell edge midpoints
-        """
-        xe = np.zeros(self.nedges_intern)
-        uxe = np.zeros_like(xe)
-        for idx, j in enumerate(self.intern):
-            xe[idx] = self.exy[j][0]  # x coordinate
-            uxe[idx] = uj[j] * self.en[j][0]
-
-        return xe, uxe
-
-    def get_xsect_avg_val(self, eta_i):
-        """
-        Return cross-sectionally averaged x velocities for non-uniform grids
-        """
-        xc = []
-        uxc = []
-        nx = self.domain_length / self.dx
-        for i in range(int(nx)):
-            startx = float(i) * self.dx
-            endx = float(i + 1) * self.dx
-            midx = (float(i) + 0.5) * self.dx
-            d = (self.grd.cells['_center'][:, 0] > startx) & (self.grd.cells['_center'][:, 0] < endx)
-            if np.sum(d) > 0:
-                utmp = np.mean(eta_i[d])
-                uxc.append(utmp)
-                xc.append(midx)
-        return (xc, uxc)
-
-    def get_grid_poly_collection(self):
-        """
-        Return list of polygon points useful for 2D plotting
-        """
-        xy = []
-        for i in range(self.ncells):
-            tmpxy = []
-            for l in range(self.ncsides[i]):
-                n = self.grd.cells[i]['nodes'][l]
-                tmp = self.grd.nodes[n]['x']
-                tmpxy.append([tmp[0], tmp[1]])
-            n = self.grd.cells[i]['nodes'][0]
-            tmp = self.grd.nodes[n]['x']
-            tmpxy.append([tmp[0], tmp[1]])
-            xy.append(tmpxy)
-
-        return xy
-
+        if n % 100 == 0:
+            # Comparison plot
+            fig = plt.figure()
+            ax = fig.add_subplot(111)
+            ax.plot(self.grd.cells['_center'][:, 0], ei, 'r.', ms=2, label='model')
+            ax.plot(self.grd.cells['_center'][:, 0], -self.ic_zi, '-k', label='bed')
+            ax.set_ylabel('Water Surface Elevation, m')
+            ax.legend(loc='upper right')
+            plt.savefig(str(n) + '.png', bbox_inches='tight')
+            plt.close('all')
 
 def get_dry_dam_break_analytical_soln(domain_length, upstream_height, tend):
     """
@@ -895,6 +1098,7 @@ def get_bump2_analytic(domain_length):
     xan = np.arange(0., domain_length, imx) + dx / 2.
     han = np.zeros(imx, np.float64)
     return (xan, han)
+
 
 # to do
 # - modularize with options
@@ -1077,33 +1281,3 @@ if __name__ == '__main__':
 
     plt.show()
     print('Complete!')
-
-
-## Overlay suntans output:
-import xarray as xr
-
-ds_adv=xr.open_dataset('../suntans/runs/straight_03/Estuary_SUNTANS.nc.nc.0')
-ds_noa=xr.open_dataset('../suntans/runs/straight_04/Estuary_SUNTANS.nc.nc.0')
-
-##
-
-#plt.figure(1).clf()
-#fig,ax=plt.subplots(num=1)
-offset=5.0
-
-for ds,ls,label in [(ds_adv,'-','sun_adv'),
-                    (ds_noa,'--','sun_lin')]:
-    x=ds.xv.values
-    ord=np.argsort(x)
-
-    # Eta
-    ax.plot( x[ord], offset+ds.eta.isel(time=-1).values[ord],color='r',ls=ls,label=label+' eta')
-
-    # bed
-    ax.plot( x[ord], offset-ds.dv.values[ord], color='k',ls=ls, label=label+'bed')
-
-    # bernoulli
-    eta=ds.eta.isel(time=-1).values
-    u=ds.uc.isel(time=-1,Nk=0).values
-    bern=eta + u**2/(2*9.8)
-    ax.plot( x[ord], offset+bern,color='b',ls=ls,label=label+' bern')
