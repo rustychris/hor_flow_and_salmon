@@ -53,7 +53,6 @@ def surveyor_to_xr(rivr_fn,proj=None,source_preferences=['mat','csv'],
         ds['x_sample']=ds.lon.dims,xy[:,0]
         ds['y_sample']=ds.lon.dims,xy[:,1]
 
-
     # Other metadata:
     ds.attrs['rivr_filename']=rivr_fn
     ds.attrs['source']=rivr_fn
@@ -82,6 +81,7 @@ def _surveyor_csv_to_xr(base):
     snr_fn=base+'snr'
     sum_fn=base+'sum'
     vel_fn=base+'vel'
+
 
     df_snr=pd.read_csv(base+'snr',parse_dates=['Date/Time'])
     df_sum=pd.read_csv(base+'sum')

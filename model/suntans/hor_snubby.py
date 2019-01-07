@@ -1,5 +1,7 @@
 """
-Driver script for Suntans Head of Old River runs
+Driver script for Suntans Head of Old River runs.
+
+This version uses the snubby grid
 """
 import six
 import logging
@@ -96,44 +98,116 @@ model.load_template("sun-template.dat")
 # steady_039: 3D, z0B=0.001, with advection.
 # steady_040: 3D, z0B=0.001, no advection
 # steady_041: 2D no advection.
-model.set_run_dir(os.path.join('runs',"steady_041"),
+# snubby_042: 2D, transition to snubby grid.
+# snubby_043:    raise H bc form
+# snubby_044:    drop Q to 220. that was still nonlinear=0
+# snubby_045:  doubled grid. nonlinear=0
+# snubby_046:  doubled grid. nonlinear=1
+# snubby_047: original grid, nonlinear=1
+# snubby_048:  nonlinear=5 (TVD)
+# snubby_049:  nonlinear=1, shuffle edges - no difference
+# snubby_050: smooth the bathymetry
+# snubby_051: more extreme smoothing.
+# snubby_052: ditch smoothing, try central difference.
+#        053: less Kh, crashes
+# snubby_054:  nonlinear=1, but suntans is ditching stmp from advection
+#      that confirms that stmp from nonlinear is the culprit.
+# snubby_055: change up the stmp output so it is *only* the horizontal advection.
+# snubby_056: single processor run
+# snubby_057: towards variable roughness, z0B=0.01*bathy_rms
+#        058: not enough effect, go to z0B=0.1*bathy_rms
+#        059: fine, go to z0B=bathy_rms
+#        060: good improvement, now return to 3D.
+#        061: 
+model.set_run_dir(os.path.join('runs',"snubby_060"),
                   mode='askclobber')
 
 model.run_start=np.datetime64('2017-03-01 00:00:00')
 model.run_stop=np.datetime64('2017-03-01 04:00:00')
-ramp_hours=5 # how quickly to increase the outflow
+ramp_hours=1 # how quickly to increase the outflow
+double_grid=0 # how many times to double the grid.
+shuffle_edges=0
+smooth_bathy=0
 
-model.config['nonlinear']=0
-model.config['Nkmax']=1
+model.config['Nkmax']=50
+
+if not double_grid:
+    # for low-friction case 1.0 was too long
+    # for high friction, 3D case, 0.5 was too long
+    # actually, it crashes regardless.  so crash faster, with
+    # 0.5
+    dt=0.5
+else:
+    dt=0.25
+model.config['dt']=dt
+model.config['ntout']=int(1800./dt)
+model.config['ntoutStore']=int(3600./dt)
+
+model.config['nonlinear']=1
 if int(model.config['Nkmax'])==1:
     model.config['stairstep']=0 # 2D, partial step
 else:
     model.config['stairstep']=1 # 3D, stairstep
 model.config['thetaM']=-1
 model.config['z0B']=0.001
-model.config['nu_H']=0.0
+if int(model.config['nonlinear'])==2:
+    # Oliver suggests u^2 dt/2
+    U=0.5 # 1.0 was stable.
+    model.config['nu_H']=U**2 * dt/2.0
+else:
+    model.config['nu_H']=0.0
 model.config['nu']=1e-5
 model.config['turbmodel']=10
 model.config['CdW']=0.0
 model.config['wetdry']=1
 
-dt=0.5 # for low-friction case 1.0 was too long
-model.config['dt']=dt
-model.config['ntout']=int(1800./dt)
-model.config['ntoutStore']=int(3600./dt)
 
-grid_src="../grid/full_merge_v15/edit10.nc"
-grid_bathy="grid-with_bathy.nc"
+if not double_grid: # original
+    grid_src="../grid/snubby_junction/snubby-01.nc"
+    grid_bathy="snubby-with_bathy.nc"
+else: # doubled
+    grid_src="snubby-doubled-edit04.nc"
+    grid_bathy="snubby-doubled-with_bathy.nc"
+
 import add_bathy
+import grid_roughness
+
 if not os.path.exists(grid_bathy) or os.stat(grid_bathy).st_mtime < os.stat(grid_src).st_mtime:
     g_src=unstructured_grid.UnstructuredGrid.from_ugrid(grid_src)
     add_bathy.add_bathy(g_src)
+    grid_roughness.add_roughness(g_src)
     g_src.write_ugrid(grid_bathy,overwrite=True)
 
-model.set_grid(unstructured_grid.UnstructuredGrid.from_ugrid(grid_bathy))
+g=unstructured_grid.UnstructuredGrid.from_ugrid(grid_bathy)
+g.orient_edges()
+
+## 
+if shuffle_edges:
+    print("Shuffling edge orientation")
+    g.edge_to_cells()
+    for j in range(g.Nedges()):
+        if g.edges['cells'][j,1]<0: continue # boundary
+        if np.random.random() < 0.5:
+            rec=g.edges[j]
+            g.modify_edge( j=j,
+                           nodes=[rec['nodes'][1],rec['nodes'][0]],
+                           cells=[rec['cells'][1],rec['cells'][0]] )
+
+if smooth_bathy:
+    d=g.cells['cell_depth']
+    M=g.smooth_matrix()
+    for i in range(smooth_bathy):
+        print("Smooth!")
+        d=M.dot(d)
+    # g.cells['cell_depth'][:]=d
+    g.add_cell_field('depth',d,on_exists='overwrite')
+    g.delete_node_field('depth')
+
+model.set_grid(g)
 
 model.grid.modify_max_sides(4)
 
+## 
 # Vertical layers:
 # freesurface BC is 2.2 (plus offset)
 #  there is that deep hole down to -10m.
@@ -148,9 +222,9 @@ model.z_offset=-4
 
 model.config['maxFaces']=4
 
-model.add_gazetteer("gis/forcing-v00.shp")
+model.add_gazetteer("../grid/snubby_junction/forcing-snubby-01.shp")
 
-Q_upstream=drv.FlowBC(name='SJ_upstream',Q=250.0)
+Q_upstream=drv.FlowBC(name='SJ_upstream',Q=220.0)
 Qdown=-100 # target outflow
 # ramp up to the full outflow over 1h
 h=np.timedelta64(1,'h')
@@ -162,29 +236,30 @@ Qdown=xr.DataArray( data=[0,0,Qdown,Qdown,Qdown],name='Q',
                                       model.run_stop,
                                       model.run_stop+24*h]) )
 Q_downstream=drv.FlowBC(name='SJ_downstream',Q=Qdown)
-h_old_river=drv.StageBC(name='Old_River',z=2.2-0.65)
+# 2.5 crashed.
+# h_old_river=drv.StageBC(name='Old_River',z=2.2-0.65)
+h_old_river=drv.StageBC(name='Old_River',z=2.5)
 
 model.add_bcs([Q_upstream,Q_downstream,h_old_river])
 
+
+## 
 model.write()
 
-#-- 
-if 0:
-    # Add in variable roughness
-    ec=model.grid.edges_center()
-    z0_map=field.GdalGrid("../../bathy/composite-roughness.tif")
+# bathy rms ranges from 0.015 to 1.5
+cell_z0B=1.0*model.grid.cells['bathy_rms']
+e2c=model.grid.edge_to_cells()
+nc1=e2c[:,0]
+nc2=e2c[:,1]
+nc2[nc2<0]=nc1[nc2<0]
+edge_z0B=0.5*( cell_z0B[nc1] + cell_z0B[nc2] )
+model.ic_ds['z0B']=('time','Ne'), edge_z0B[None,:]
 
-    z0=z0_map(ec)
-    z0[np.isnan(z0)]=float(model.config['z0B'])
-    model.ic_ds['z0B']=('time','Ne'),z0[None,:]
-    model.write_ic_ds()
+model.write_ic_ds()
 
-#
-
+## 
 model.partition()
-model.sun_verbose_flag='-v'
+model.sun_verbose_flag='-vv'
 model.run_simulation()
 
 
-# with the lower friction, get a vertical courant number of 5.25
-# due to a cell that's 1mm thick.

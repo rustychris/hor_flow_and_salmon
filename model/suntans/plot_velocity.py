@@ -1,17 +1,23 @@
 import xarray as xr
 from stompy.grid import ugrid
+from stompy.model.suntans import sun_driver
+
+##
+model=sun_driver.SuntansModel.load("runs/steady_008dt1/suntans.dat")
 
 ##
 
-dss=[xr.open_dataset("runs/steady_008dt1/Estuary_SUNTANS.nc.nc.%d"%p)
-     for p in range(4)]
+dss=[xr.open_dataset(fn) for fn in model.map_outputs()]
 
-for ds in dss:
-    # clean up bad metadata in the suntans output
-    ds.dv.attrs['standard_name']=ds.dv.attrs['stanford_name'] # doh!
-    ds.dv.attrs['positive']='down'
-    ds.eta.attrs['positive']='up'
-    ds.z_r.attrs['positive']='down'
+
+# 2018-09-15: fixed in suntans code
+
+# for ds in dss:
+#     # clean up bad metadata in the suntans output
+#     ds.dv.attrs['standard_name']=ds.dv.attrs['stanford_name'] # doh!
+#     ds.dv.attrs['positive']='down'
+#     ds.eta.attrs['positive']='up'
+#     ds.z_r.attrs['positive']='down'
 
 ##
 zoom=(647014., 647584., 4185599., 4186016)
@@ -52,6 +58,6 @@ ax.axis(zoom)
 
 from stompy.plot import plot_utils
 
-plot_utils.savefig_geo(fig,'velocity-snap.png',transparent=True,dpi=150)
+#plot_utils.savefig_geo(fig,'velocity-snap.png',transparent=True,dpi=150)
 
 

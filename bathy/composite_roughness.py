@@ -1,27 +1,16 @@
 """
-Importable field, for multiprocessing while producing tiles
+Render roughness map
 """
 import numpy as np
 from stompy.spatial import field
 from stompy.spatial import interp_coverage
 
 import os
-opj=os.path.join
-
-tif_paths=[".","/home/rusty/data/bathy_dwr/gtiff"]
 
 def factory(attrs):
     geo_bounds=attrs['geom'].bounds
 
-    if attrs['src_name'].endswith('.tif'):
-        for p in tif_paths:
-            fn=opj(p,attrs['src_name'])
-            if os.path.exists(fn):
-                f=field.GdalGrid(fn,geo_bounds=geo_bounds)
-                f.default_interpolation='linear'
-                return f
-        raise Exception("Could not find tif %s"%attrs['src_name'])
-    elif attrs['src_name'].startswith('py:'):
+    if attrs['src_name'].startswith('py:'):
         expr=attrs['src_name'][3:]
         # something like 'ConstantField(-1.0)'
         # a little sneaky... make it look like it's running
@@ -36,17 +25,13 @@ def factory(attrs):
 
     assert False
 
-#src_shp='hor_master_sources.shp'
-# use updated DWR dataset instead of the ADCP interpolated stuff
-src_shp='hor_master_sources-no_adcp.shp'
+src_shp='roughness_sources.shp'
 
 mbf=field.CompositeField(shp_fn=src_shp,
                          factory=factory,
                          priority_field='priority',
                          data_mode='data_mode',
                          alpha_mode='alpha_mode')
-
-## Generate a tile at the junction
 
 xxyy=[642800, 649400, 4183200, 4188400]
 bleed=50
@@ -57,12 +42,7 @@ xxyy_pad=[ xxyy[0]-bleed,
 dem=mbf.to_grid(dx=2,dy=2,bounds=xxyy_pad)
 
 dem=dem.crop(xxyy)
-dem.write_gdal('junction-composite-dem-no_adcp.tif')
-
-##
-
-plt.figure(10).clf() ;dem.plot(cmap=cmap)
-plt.colorbar()
-
-# plt.savefig('composite-junction.png')
+out_fn='composite-roughness.tif'
+os.path.exists(out_fn) and os.unlink(out_fn)
+dem.write_gdal(out_fn)
 
