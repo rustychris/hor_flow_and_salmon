@@ -34,13 +34,18 @@ def bathy():
     return tile
 
 def tran_zoom(ds,fac=0.1):
-    return utils.expand_xxyy([np.nanmin(ds.x_sample.values), np.nanmax(ds.x_sample.values),
+    zoom=utils.expand_xxyy([np.nanmin(ds.x_sample.values), np.nanmax(ds.x_sample.values),
                               np.nanmin(ds.y_sample.values), np.nanmax(ds.y_sample.values) ],
                              fac)
+    return zoom
 
 def set_bounds(ax,ds,fac=0.1):
-    ax.axis('equal')
-    ax.axis(tran_zoom(ds,fac=fac))
+    # in some cases MPL goes nuts when trying to manipulate
+    # datalim.  just give in, let it manipulate the box.
+    ax.set_adjustable('box')
+    ax.set_aspect(1)
+    zoom=tran_zoom(ds,fac=fac)
+    ax.axis(zoom)
 
 ##
 
@@ -131,14 +136,26 @@ def summarize_transect(tran,num=None,w_scale=1.0,quiver_count=75,
                     sel=np.random.choice(N,size=quiver_count,replace=False)
             else:
                 sel=slice(None)
+
+            # go to bitmask so we can mask out nan values too.
+            mask=np.zeros(N,np.bool8)
+            mask[sel]=True
+            mask[ np.isnan(y_vals) ] = False
+            sel=mask
+            
             quiv=ax2.quiver(x_vals[sel],y_vals[sel],u_vals[sel],v_vals[sel],scale=2.5,angles='xy')
+            # Not sure why this necessary, but it seems to be.
+            slice_axis=[np.nanmin(x_vals),np.nanmax(x_vals),
+                        np.nanmin(y_vals),max(0,np.nanmax(y_vals))]
+
+            ax2.axis(slice_axis)
+            ax1.axis(slice_axis)
             ax1.text(0.05,0.05,"Streamwise",transform=ax1.transAxes)
             ax2.text(0.05,0.05,"Lateral",transform=ax2.transAxes)
 
     for ax in [ax1,ax2]:
         if 'z_bed' in tran:
             ax.plot(tran.d_sample, z_sgn*tran.z_bed, 'k-', lw=0.8)
-        ax.axis(ymax=0.0)
 
     plt.colorbar(coll_1,ax=ax1,label='m/s')
     plt.colorbar(coll_2,ax=ax2,label='m/s')
@@ -188,6 +205,7 @@ def summarize_transect(tran,num=None,w_scale=1.0,quiver_count=75,
            "Source: %s"%getattr(tran,'source','n/a'),
            "Transect: %s"%getattr(tran,'transect_name','n/a')]
     fig.text(0.1,0.11,"\n".join(lines),va='top')
+
     return fig
 
 
