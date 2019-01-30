@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 
 df_tags=pd.read_csv('cleaned_df.csv',
                     parse_dates=["dt"])
@@ -33,24 +34,39 @@ ds=cdec.cdec_dataset(station="MSD",
                      sensor=20,cache_dir='.')
 ##
 
-plt.figure(1).clf()
+fig=plt.figure(1)
+fig.set_size_inches([8,6],forward=True)
+fig.clf()
+
 ax2=plt.gca()
 ax=ax2.twinx()
 
-ax.plot(ds.time,ds.sensor0020,label="MSD Flow")
-ax.set_ylabel('Mossdale (CFS)')
+ls_flow=ax.plot(ds.time,ds.sensor0020,label="MSD Flow")[0]
 
+ax.set_ylabel('Mossdale (CFS)')
+col=ls_flow.get_color()
+ax.yaxis.label.set_color(col)
+plt.setp(ax.get_yticklabels(),color=col)
 
 from stompy import utils
 
 bins=np.arange(start_date,end_date,np.timedelta64(1,'D'))
 
+col='darkorange'
 ax2.hist(utils.to_dnum(df_tags.dt.values),
-         bins=utils.to_dnum(bins),color='orange',alpha=0.5)
+         bins=utils.to_dnum(bins),color=col)
+ax2.yaxis.label.set_color(col)
+plt.setp(ax2.get_yticklabels(),color=col)
+ax2.set_ylabel('Detections')
 
 Qmodel=220 * 35.314667
-ax.axhline(Qmodel,color='k',lw=0.5)
-ax.axvline(np.datetime64("2018-04-05"),color='k',lw=0.5)
+time_model=np.datetime64("2018-04-05")
+# ax.axhline(Qmodel,color='k',lw=0.5,zorder=-2)
+ax.axvline(time_model,color='k',lw=0.5,zorder=-10)
+
+ax.annotate(" ADCP data\n collection",[time_model,Qmodel],
+            ha='left',
+            va='top' )
 
 ##
 

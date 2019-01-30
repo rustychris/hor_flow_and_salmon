@@ -47,22 +47,14 @@ mbf=field.CompositeField(shp_fn=src_shp,
                          alpha_mode='alpha_mode')
 
 ## Generate a tile at the junction
+if __name__=='__main__':
+    xxyy=[642800, 649400, 4183200, 4188400]
+    bleed=50
+    xxyy_pad=[ xxyy[0]-bleed,
+               xxyy[1]+bleed,
+               xxyy[2]-bleed,
+               xxyy[3]+bleed ]
+    dem=mbf.to_grid(dx=2,dy=2,bounds=xxyy_pad)
 
-xxyy=[642800, 649400, 4183200, 4188400]
-bleed=50
-xxyy_pad=[ xxyy[0]-bleed,
-           xxyy[1]+bleed,
-           xxyy[2]-bleed,
-           xxyy[3]+bleed ]
-dem=mbf.to_grid(dx=2,dy=2,bounds=xxyy_pad)
-
-dem=dem.crop(xxyy)
-dem.write_gdal('junction-composite-dem-no_adcp.tif')
-
-##
-
-plt.figure(10).clf() ;dem.plot(cmap=cmap)
-plt.colorbar()
-
-# plt.savefig('composite-junction.png')
-
+    dem=dem.crop(xxyy)
+    dem.write_gdal('junction-composite-20190117-no_adcp.tif')

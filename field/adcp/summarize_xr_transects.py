@@ -113,7 +113,7 @@ def summarize_transect(tran,num=None,w_scale=1.0,quiver_count=75,
 
     if 1: # downstream/left
         coll_1=xr_transect.plot_scalar_polys(tran,tran.Uroz.isel(roz=0),ax=ax1,cmap='CMRmap_r')
-        coll_2=xr_transect.plot_scalar_polys(tran,tran.Uroz.isel(roz=1),ax=ax2,cmap='seismic')
+        coll_2=xr_transect.plot_scalar_polys(tran,tran.Uroz.isel(roz=1),ax=ax2,cmap='Spectral')
         # consistent with previous plots
         coll_1.set_clim([0,1.2])
         coll_2.set_clim([-0.2,0.2])
@@ -168,6 +168,8 @@ def summarize_transect(tran,num=None,w_scale=1.0,quiver_count=75,
         pos=[pos.xmin,pos.ymin,ax1_pos.width,pos.height]
         ax_avg.set_position(pos)
 
+        ax_avg.text(0.05,0.05,"Depth average",transform=ax_avg.transAxes)
+
         u_avg=xr_transect.depth_avg(tran,tran.Uroz.isel(roz=0))
 
         lp_win=int(len(tran.d_sample)/smooth_samples)
@@ -176,7 +178,7 @@ def summarize_transect(tran,num=None,w_scale=1.0,quiver_count=75,
         else:
             def smooth(x): return x
 
-        ax_avg.plot( tran.d_sample, smooth(u_avg.values), label='U davg')
+        ax_avg.plot( tran.d_sample, smooth(u_avg.values), label='Model streamwise')
         if 'mean_water_speed' in tran: # see if we get something similar to them
             ax_avg.plot( tran.d_sample, smooth(tran.mean_water_speed), label='Mean water speed')
         if 1: # secondary strength
@@ -185,15 +187,15 @@ def summarize_transect(tran,num=None,w_scale=1.0,quiver_count=75,
 
             if 'secondary' not in tran:
                 xr_transect.calc_secondary_strength(tran,name='secondary')
-            style=dict(lw=0.5, color='g',label='Secondary velocity')
+            style=dict(lw=0.5, color='g',label='Model secondary')
             #ax_sec.plot(tran.d_sample, smooth(tran.secondary), **style)
             ax_sec.fill_between(tran.d_sample, 0, smooth(tran.secondary),
                                 alpha=0.3, **style)
-            ax_avg.plot([np.nan],[np.nan],**style)
+            #ax_avg.plot([np.nan],[np.nan],**style)
             ax_sec.axis(ymin=-0.1,ymax=0.1)
-            ax_avg.axis(ymin=0)
-
-        ax_avg.legend()
+            ax_sec.legend(loc='upper right')
+        ax_avg.axis(ymin=0)
+        ax_avg.legend(loc='upper left')
 
     Q=xr_transect.Qleft(tran)
     A=xr_transect.total_int(tran,1)

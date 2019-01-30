@@ -64,19 +64,22 @@ model.load_template("sun-template.dat")
 #        059: fine, go to z0B=bathy_rms
 #        060: good improvement, now return to 3D.
 #        061: cleanup, and try real turbulence not parabolic.
-model.set_run_dir(os.path.join('runs',"snubby_061"),
+#        062: record CFL Limiting cells
+#        063: no dredging.
+#        064: smoother barrier in the DEM
+#        065: tweak partitioning parameters, and try parabolic
+#        066: keep parabolic, double roughness
+#        067: half roughness (relative to 065)
+#        068: stick with z0B=0.5*bathy_rms, and try half the vertical layers
+model.set_run_dir(os.path.join('runs',"snubby_068"),
                   mode='askclobber')
 
 model.run_start=np.datetime64('2017-03-01 00:00:00')
 model.run_stop=np.datetime64('2017-03-01 04:00:00')
 ramp_hours=1 # how quickly to increase the outflow
 
-model.config['Nkmax']=50
+model.config['Nkmax']=25
 
-# for low-friction case 1.0 was too long
-# for high friction, 3D case, 0.5 was too long
-# actually, it crashes regardless.  so crash faster, with
-# 0.5
 dt=0.5
 model.config['dt']=dt
 model.config['ntout']=int(1800./dt)
@@ -91,7 +94,7 @@ model.config['thetaM']=-1
 model.config['z0B']=0.001
 model.config['nu_H']=0.0
 model.config['nu']=1e-5
-model.config['turbmodel']=1 # 1: my25, 10: parabolic
+model.config['turbmodel']=10 # 1: my25, 10: parabolic
 model.config['CdW']=0.0
 model.config['wetdry']=1
 
@@ -133,7 +136,7 @@ model.config['maxFaces']=4
 
 model.add_gazetteer("../grid/snubby_junction/forcing-snubby-01.shp")
 
-Q_upstream=drv.FlowBC(name='SJ_upstream',Q=220.0)
+Q_upstream=drv.FlowBC(name='SJ_upstream',Q=220.0,dredge_depth=None)
 Qdown=-100 # target outflow
 # ramp up to the full outflow over 1h
 h=np.timedelta64(1,'h')
@@ -144,7 +147,7 @@ Qdown=xr.DataArray( data=[0,0,Qdown,Qdown,Qdown],name='Q',
                                       model.run_start+ramp_hours*h,
                                       model.run_stop,
                                       model.run_stop+24*h]) )
-Q_downstream=drv.FlowBC(name='SJ_downstream',Q=Qdown)
+Q_downstream=drv.FlowBC(name='SJ_downstream',Q=Qdown,dredge_depth=None)
 # 2.5 crashed.
 # h_old_river=drv.StageBC(name='Old_River',z=2.2-0.65)
 h_old_river=drv.StageBC(name='Old_River',z=2.5)
@@ -156,7 +159,7 @@ model.add_bcs([Q_upstream,Q_downstream,h_old_river])
 model.write()
 
 # bathy rms ranges from 0.015 to 1.5
-cell_z0B=1.0*model.grid.cells['bathy_rms']
+cell_z0B=0.5*model.grid.cells['bathy_rms']
 e2c=model.grid.edge_to_cells()
 nc1=e2c[:,0]
 nc2=e2c[:,1]
