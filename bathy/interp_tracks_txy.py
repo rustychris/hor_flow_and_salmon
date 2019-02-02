@@ -56,6 +56,7 @@ elif src=='dem':
     xyz_dense[:,2] = dem( xyz_dense[:,:2] )
 
 ##
+from sklearn.cluster import AgglomerativeClustering
 
 xyzs=xyz_dense.copy()
 
@@ -191,9 +192,9 @@ for i,y0 in enumerate(xyzs):
 
 ##
 
-if 0:
-    plt.figure(1).clf()
-    fig,ax=plt.subplots(num=1)
+if 1:
+    plt.figure(2).clf()
+    fig,ax=plt.subplots(num=2)
     fig.set_size_inches((12,10),forward=True)
 
     g.plot_edges(clip=clip,ax=ax,color='k',lw=0.4)
@@ -206,19 +207,20 @@ if 0:
     ax.add_collection(lcoll)
     ax.axis('equal')
     fig.tight_layout()
-    fig.savefig('grid-samples-streamlines.png')
+    # fig.savefig('grid-samples-streamlines.png')
 
 ## Quantize the tracks, and scale 3rd dimension
 
 stream_factor=0.1 # controls the anisotropy of the search
 
 quant_tracks=[]
+track_quant_scale=1.0
 for track in tracks:
     # resample track to quant_scale, taking into account stream_factor
     # the goal is to quantize the 3D dataset equally in x,y, and t/d.
     # make sure 0 is still in there
-    neg_d=-np.arange(0.0,-track[0,0],quant_scale)[::-1]
-    pos_d=np.arange(0.0,track[-1,0],quant_scale)[1:]
+    neg_d=-np.arange(0.0,-track[0,0],track_quant_scale)[::-1]
+    pos_d=np.arange(0.0,track[-1,0],track_quant_scale)[1:]
     tgt_d=np.r_[neg_d,pos_d]
     qtrack=np.zeros( (len(tgt_d),3), np.float64)
     qtrack[:,0]=tgt_d * stream_factor
@@ -239,10 +241,10 @@ kdt_txy=scipy.spatial.KDTree(all_txy)
 ## query
 
 # target=[0,647376,4.18578e6] # worked great
-# target=[0,647380, 4185780.0] # better
+target=[0,647380, 4185780.0] # better
 # target=[0,647409.8622228608, 4185783.646267513]
 # target=[0, 647218, 4185888]
-target=[0, 647164., 4185844.] # tricky spot with ADCP data
+# target=[0, 647164., 4185844.] # tricky spot with ADCP data - tip of barrier
 # target=[0, 647159., 4185844.]
 
 # Is it any better to choose only the "closest" of the samples along a track?
@@ -285,6 +287,7 @@ axs[1,0].plot( [target[1]],[target[2]],'mo',ms=10)
 
 img=tile.plot(ax=axs[1,1],cmap=cmap)
 axs[1,1].plot( [target[1]],[target[2]],'mo',ms=10)
+axs[1,1].set_title('DEM tile')
 
 z_clim=[-6,3]
 
