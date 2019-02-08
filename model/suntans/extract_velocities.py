@@ -57,46 +57,17 @@ if 1: # plot a quick a test of the output
 # extract a velocity for each of the detections.
 #inp_fn="../../field/tags/segments_2.csv"
 inp_fn="../../field/tags/segments_2m.csv"
-segments=pd.read_csv(inp_fn)
-
-##
-
-# first line of cleaned_half meter.csv:
-# 1,71aa,3,647410.6,4185684.1,5,1521903581,6.20E-05,3/24/2018 7:59,878668
-
-# epoch20180324T0759=1521903581
-# datetime.datetime.fromtimestamp(epoch20180324T0759) # datetime.datetime(2018, 3, 24, 7, 59, 41)
-# # daylight savings time began on March 11, 2018.
-# # subtract 20 days from the above time stamp, convert:
-# datetime.datetime.fromtimestamp(epoch20180324T0759-20*86400) # datetime.datetime(2018, 3, 4, 6, 59, 41)
-# # does this conversion change around PST/PDT? yes.
-# 
-# (1521903581 % 86400) / 3600. # ==> 14.994  i.e. UTC 14:59:41
-# # so that suggests 7 hour offset from UTC, which is PDT
-
-# HERE - either get info from Ed, or consult the data to figure out the timezone for
-# Ed's datenums.
-
-# dt_utc=[datetime.datetime.utcfromtimestamp(es)
-#         for es in detects.Epoch_Sec.values ]
-# 
-# detects['dnum_utc']=detects_dnum_utc=utils.to_dnum(dt_utc)
-
 # segment dnums appear to be in PDT.
 # with some quantization of about 30 seconds.
 seg_dnum_to_utc=7./24 # add this to segment dnums to get utc.
 
-##
-
-segment_vel=np.nan*np.zeros( (len(segments),2), np.float64)
-
-##
+segments=pd.read_csv(inp_fn)
 
 # And what timezone is the model in? UTC.
 
-
-six.moves.reload_module(sun_driver)
+# choose the last run of a sequence:
 mod=sun_driver.SuntansModel.load('/home/rusty/src/hor_flow_and_salmon/model/suntans/runs/snubby_cfg001_20180411')
+
 seq=mod.chain_restarts()
 
 all_stations_ds=[]
@@ -116,42 +87,36 @@ for model_day in seq:
                     segments.ym.values[idxs]]
 
     # These will have the whole day
-    # break
-    # Why is this so slow? b/c it loops over variables, then  stations,
-    # and uses two isel() calls in the inner loop
     stations=model_day.extract_station(xy=sample_xy)
     # Slim to just the specific timestamps
     sample_times=seg_dt64_utc[idxs]
 
     # this gives time errors [0,1800s]
     #time_idxs=np.searchsorted( stations.time.values, sample_times )
-    # should give time errors [-900s,900s]
+    # this centers the time offsets [-900s,900s]
     time_idxs=utils.nearest(stations.time.values, sample_times )
 
     station_dss=[ stations.isel(station=station_i,time=time_idx)
                   for station_i,time_idx in enumerate(time_idxs)]
     stations_ds=xr.concat(station_dss,dim='station')
     # And record the original index so they can be put back together
-    stations_ds['detect_idx']=('station',),idxs
+    stations_ds['input_idx']=('station',),idxs
     all_stations_ds.append(stations_ds)
 
 ##
 
-# Still kind of slow, but workable.
-#  yields ds with station len 18792
-#  
 joined=xr.concat(all_stations_ds,dim='station')
 # Make sure we hit every station
 assert np.all(np.unique(all_idxs)==np.arange(len(all_idxs)))
 # And reorder to get the same order as the inputs
-joined=joined.sortby(joined.detect_idx)
+joined=joined.sortby(joined.input_idx)
 assert joined.dims['station']==len(segments)
 
 # For 2D, pick Nk=0
 joined=joined.isel(Nk=0)
 
 ##
-if 1: # quiver with all stations
+if 0: # quiver with all stations
     fig=plt.figure(2)
     fig.clf()
     ax=fig.add_axes([0,0,1,1])
@@ -169,8 +134,6 @@ if 1: # quiver with all stations
                    joined.distance_from_target.values,
                    cmap='jet')
 
-##
-
 # Add back to original dataframe and output
 segments['model_time']=joined['time'].values
 segments['model_z_bed']=-joined['dv'].values
@@ -181,13 +144,12 @@ segments['model_loc_err']=joined['distance_from_target'].values
 segments['model_x']=joined['station_x'].values
 segments['model_y']=joined['station_y'].values
 
-##
+
 if 0: # time error
     # shows errors distributed evenly [-900,900s]
     time_error = (utils.to_dnum(joined.time) - segments.dnm.values) - 7./24
     plt.figure(3).clf() ; plt.hist( time_error * 86400, 100)
 
-##
 
 out_fn=inp_fn.replace(".csv","-model20190203.csv")
 assert out_fn!=inp_fn
