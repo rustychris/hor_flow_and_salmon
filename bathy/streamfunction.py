@@ -6,6 +6,7 @@ from stompy.model.suntans import sun_driver
 from stompy.grid import unstructured_grid
 from stompy.spatial import wkb2shp, linestring_utils
 import matplotlib.pyplot as plt
+from matplotlib import collections
 import numpy as np
 import xarray as xr
 
@@ -186,9 +187,12 @@ def quad_to_triangles(hydro):
     fill_by_divergence(gtri,Qtri)
 
     # Move this earlier as part of initialization
-    gtri.add_cell_field('wc_depth', g.cells['wc_depth'][ gtri.cells['orig_cell'] ], on_exists='overwrite')
+    gtri.add_cell_field('wc_depth', hydro['g'].cells['wc_depth'][ gtri.cells['orig_cell'] ], on_exists='overwrite')
 
     Vtri=gtri.cells_area()*gtri.cells['wc_depth']
+
+    # Make sure edges['cells'] is fresh to save time later
+    gtri.edge_to_cells()
 
     return dict(g=gtri,Q=Qtri,V=Vtri)
 
@@ -198,7 +202,6 @@ def quad_to_triangles(hydro):
 # and corrected at boundaries.
 
 # Precalculate the mean flow in each triangle via Perot
-
 
 def U_perot(gtri,Qtri,Vtri):
     cc=gtri.cells_center()
@@ -228,22 +231,28 @@ tri_hydro['U']=U_perot(tri_hydro['g'],tri_hydro['Q'],tri_hydro['V'])
 
 ##
 
-def steady_streamline_oneway(gtri,Uc,x0,max_t=3600,rotate=False):
+def steady_streamline_oneway(gtri,Uc,x0,max_t=3600,allow_divergence=False,
+                             u_min=1e-3):
+    """
+    allow_divergence: allow edges to have divergent adjacent velocities.
+    """
     # trace some streamlines
     x0=np.asarray(x0)
-    if rotate:
-        U=utils.rot(np.pi/2,U)
-
+        
     c=gtri.select_cells_nearest(x0,inside=True)
     t=0.0 # steady field, start the counter at 0.0
     edge_norm=gtri.edges_normals()
     edge_ctr=gtri.edges_center()
     x=x0.copy()
     pnts=[x.copy()]
+    cells=[c] # for debugging track the past cells
 
+    e2c=gtri.edges['cells']
+    
     while (t<max_t) and (c>=0):
         dt_max_edge=np.inf # longest time step we're allowed based on hitting an edge
         j_cross=None
+        c_cross=None # the cell that would be entered
         j_cross_normal=None
 
         for j in gtri.cell_to_edges(c):
@@ -259,22 +268,35 @@ def steady_streamline_oneway(gtri,Uc,x0,max_t=3600,rotate=False):
 
             # perpendicular distance
             dp_xy_n=d_xy_n[0] * out_normal[0] + d_xy_n[1]*out_normal[1]
-            assert dp_xy_n>=-0.01 #otherwise csgn probably wrong above
+            if not allow_divergence:
+                assert dp_xy_n>=-0.01 #otherwise csgn probably wrong above
 
             if dp_xy_n<0.0: # roundoff error
                 dp_xy_n=0.0
 
             closing=Uc[c,0]*out_normal[0] + Uc[c,1]*out_normal[1]
 
-            if closing<0: # moving away from that edge
-                continue
+            # what cell would we be entering?
+            if e2c[j,0]==c:
+                nbr_c=e2c[j,1]
+            elif e2c[j,1]==c:
+                nbr_c=e2c[j,0]
             else:
-                if (dp_xy_n==0.0) and (closing!=0.0):
-                    print("On edge j=%d, dp_xy_n is zero, and closing is %f"%(j,closing))
-                dt_j=dp_xy_n/closing
-                if dt_j>0 and dt_j<dt_max_edge:
-                    j_cross=j
-                    dt_max_edge=dt_j
+                assert False
+
+            if closing<0: continue # moving away from that edge
+
+            if len(cells)>1 and nbr_c==cells[-2]:
+                # print('Would be reentering cell %d.  Skip that option'%nbr_c)
+                continue
+
+            if (dp_xy_n==0.0) and (closing!=0.0):
+                print("On edge j=%d, dp_xy_n is zero, and closing is %f"%(j,closing))
+            dt_j=dp_xy_n/closing
+            if dt_j>0 and dt_j<dt_max_edge:
+                j_cross=j
+                c_cross=nbr_c
+                dt_max_edge=dt_j
 
         t_max_edge=t+dt_max_edge
         if t_max_edge>max_t:
@@ -292,49 +314,104 @@ def steady_streamline_oneway(gtri,Uc,x0,max_t=3600,rotate=False):
         x += delta
         pnts.append(x.copy())
 
-        if j_cross is not None:
-            # cross edge j, update time.  careful that j isn't boundary
-            # or start sliding on boundary.
-            # print "Cross edge"
-            if e2c[j_cross,0]==c:
-                c=e2c[j_cross,1]
-            elif e2c[j_cross,1]==c:
-                c=e2c[j_cross,0]
-            else:
-                assert False
-            if Uc[c,0]==Uc[c,1]==0.0:
+        if j_cross is not None: # crossing an edge
+            c=c_cross
+            if c<0:
+                break
+
+            # with roundoff, good to make sure that we are properly on the
+            # line segment of j_cross
+            nodes=gtri.nodes['x'][ gtri.edges['nodes'][j_cross] ]
+            
+            tangent=nodes[1]-nodes[0]
+            edgelen=utils.mag(tangent)
+            tangent /= edgelen
+            
+            alpha=np.dot( x-nodes[0], tangent ) / edgelen
+            eps=1e-4
+            if alpha<eps: 
+                print('alpha correction %f => %f'%(alpha,eps))
+                alpha=1e-4
+            elif alpha>1-eps:
+                print('alpha correction %f => %f'%(alpha,1-eps))
+                alpha=1-eps
+            x=(1-alpha)*nodes[0] + alpha*nodes[1]
+            pnts[-1]=x.copy()
+            
+            cells.append(c)
+
+            umag=utils.mag(Uc[c])
+            if umag<=u_min:
                 # should only happen with rotate velocities
                 # means we hit shore.
                 break
 
     pnts=np.array(pnts)
-    return pnts
-
+    cells=np.array(cells)
+    return pnts,cells
 
 def steady_streamline_along(x0,hydro):
-    fwd=steady_streamline_oneway(gtri,Uc,x0)
-    rev=steady_streamline_oneway(gtri,-Uc,x0)
+    Uc=hydro['U']
+    gtri=hydro['g']
+    fwd,_=steady_streamline_oneway(gtri,Uc,x0)
+    rev,_=steady_streamline_oneway(gtri,-Uc,x0)
     return np.concatenate( ( rev[::-1],fwd[1:] ) )
-def steady_streamline_across(x0,hydro):
-    Ucrot=utils.rot(np.pi/2,Uc)
-    left=steady_streamline_oneway(gtri,Ucrot,x0)
-    right=steady_streamline_oneway(gtri,-Ucrot,x0)
-    return np.concatenate( ( left[::-1],right[1:] ) )
-    
-x0=np.array([647111.27074059,4185842.10825328])
-along=steady_streamline_along(x0,tri_hydro)
-across=steady_streamline_across(x0,tri_hydro)
 
-## 
+def steady_streamline_across(x0,hydro):
+    Uc=hydro['U']
+    gtri=hydro['g']
+    Ucrot=utils.rot(np.pi/2,Uc)
+    left,l_cells=steady_streamline_oneway(gtri,Ucrot,x0)
+    right,r_cells=steady_streamline_oneway(gtri,-Ucrot,x0)
+    return np.concatenate( ( left[::-1],right[1:] ) )
+
+
+# x0=np.array([647111.27074059,4185842.10825328])
+# x0=np.array([ 647560.68669735, 4185508.97425484])
+#along=steady_streamline_along(x0,tri_hydro)
+#across=steady_streamline_across(x0,tri_hydro)
+
+
+##
+gtri=tri_hydro['g']
+
 plt.figure(1).clf()
 gtri.plot_edges()
-plt.plot(along[:,0],along[:,1],'r-')
-plt.plot(across[:,0],across[:,1],'g-')
+plt.plot(left[:,0],left[:,1],'r-') # BAD
+plt.plot(right[:,0],right[:,1],'g-')
 plt.axis('equal')
 
+gtri.plot_cells(labeler=lambda i,r: str(i), clip=zoom,facecolor='none',edgecolor='k',
+                centroid=True)
 
-# drifts weirdly on the HOR side.  An artifact of the frictionless run
+
+# Somehow left is going into 3888, it think it is then going into
+# 3887, which it does very briefly, but it jumps from 3887,
+# should be going into 3907, but actually goes the other way?
+# I think the problem may be that 3888-3887 is a convergent edge
+# Uc[3888]
+# Out[261]: array([ 0.00319476, -0.00189244])
+# 
+# In [262]: Uc[3887]
+# Out[262]: array([-0.00017572, -0.000887  ])
+# 
+
+# Kludge is to stop on small velocities.
+# that seems to be working okay.
+
+# so this is a case where the divergence of the rotated field is nonzero.
+# at the scale of two adjacent cells, if there is a change in the
+# current direction, there isn't a way to represent the potential flow nature of
+# the current
+
+# that's not the full story though.  a perturbation of just 1e-9 is enough to
+# avoid this issue.
+# the cell history is
+# [12526, 1690, 1689, 2295, 1689, 2295, 3888, 2295]
+
+# drifts weirdly on the HOR outflow BC.  An artifact of the frictionless run
 # and stage BC.
+
 ##
 alongs=[]
 acrosses=[]
@@ -348,25 +425,51 @@ for s in source_ds.sample.values:
 
     alongs.append(along)
     acrosses.append(across)
-
+    
 ##
+
+bad=546
+x0=source_ds.x.values[546,:]
+
+Uc=tri_hydro['U']
+gtri=tri_hydro['g']
+Ucrot=utils.rot(np.pi/2,Uc)
+#left,l_cells=steady_streamline_oneway(gtri,Ucrot,x0)
+right,r_cells=steady_streamline_oneway(gtri,-Ucrot,x0)
+
+#across=steady_streamline_across(x0,tri_hydro)
 
 plt.figure(1).clf()
 fig,ax=plt.subplots(1,1,num=1)
 
-gtri.plot_edges(ax=ax)
-ax.text(x0[0],x0[1],"x0")
+gtri.plot_edges(ax=ax,color='k',lw=0.3)
 
-##
+slc=slice(bad,bad+1)
+#ax.add_collection(collections.LineCollection(alongs[slc],color='b'))
+#ax.add_collection(collections.LineCollection(acrosses[slc],color='g'))
+ax.plot( source_ds.x.values[slc,0],source_ds.x.values[slc,1],'mo')
+ax.plot( right[:,0],
+         right[:,1],
+         'r-o')
+gtri.plot_cells(mask=r_cells,centroid=True,labeler=lambda i,r:str(i))
 
-# cell 2295 has weird stuff in the across trace.
-# suddenly has an along-channel velocity
-# is it super shallow?
+# bad bounce.
+# probably a convergent edge.
 
-plt.figure(2).clf()
-fig,ax=plt.subplots(1,1,num=2)
+# For right, -Ucrot, starts in this cell:
+#  -Ucrot[5960]
+#  array([-0.296335  ,  0.30229126])
+# Then here:
+#  -Ucrot[5959]
+#  array([0.35587373, 0.34833896])
 
-gtri.plot_edges(ax=ax)
-cntr=gtri.cells_centroid()
+# It's a convergent edge.  Now that I skip the edge that it entered on,
+# it is free to go forever.
+# So rather than just ignoring the edge it came in on, if that really is
+# the winner (may have to be more careful about that calc, too), then
+# travel along the edge?
 
-ax.quiver( cntr[:,0],cntr[:,1], tri_hydro['U'][:,0], tri_hydro['U'][:,1])
+# maybe a postprocessing step on the rotate velocities would help?
+
+# or an analog to Perot that works for tangential velocities?
+# 
