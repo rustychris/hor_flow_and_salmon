@@ -3,3 +3,4 @@ __pycache__
 *.tif
 merged_map.nc
 *.aux.xml
+*~

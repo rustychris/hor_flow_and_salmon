@@ -1,6 +1,9 @@
 # Extract streamfunction and potential field from hydro
 # to define a coordinate system for extrapolation.
 import os
+from shapely import geometry
+from stompy.spatial import field
+
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import collections
@@ -95,197 +98,9 @@ if 1:
 
 ##
 
-# Then a Perot-like calculation on each cell in the dual
-def U_perot(g,Q,V):
-    cc=g.cells_center()
-    ec=g.edges_center()
-    normals=g.edges_normals()
-
-    e2c=g.edge_to_cells()
-    Uc=np.zeros((g.Ncells(),2),np.float64)
-    dist_edge_face=np.nan*np.zeros( (g.Ncells(),g.max_sides), np.float64)
-
-    for c in np.arange(g.Ncells()):
-        js=g.cell_to_edges(c)
-        for nf,j in enumerate(js):
-            # normal points from cell 0 to cell 1
-            if e2c[j,0]==c: # normal points away from c
-                csgn=1
-            else:
-                csgn=-1
-            dist_edge_face[c,nf]=np.dot( (ec[j]-cc[c]), normals[j] ) * csgn
-            # Uc ~ m3/s * m
-            Uc[c,:] += Q[j]*normals[j]*dist_edge_face[c,nf]
-    Uc /= np.maximum(V,0.01)[:,None]
-    return Uc
-
-def rotated_hydro(hydro):
-    """
-    hydro: xarray Dataset with a grid and edge-centered fluxes in Q.
-    returns a new Dataset with the dual grid, 90deg rotated edge velocities,
-    and cell-centered vector velocities.
-    """
-    g=unstructured_grid.UnstructuredGrid.from_ugrid(hydro)
-    
-    # using centroids yields edges that aren't orthogonal, but the centers
-    # are nicely centered in the cells.
-    # As long as the grid is nice and orthogonal, it should be okay
-    # use true circumcenters.
-    gd=g.create_dual(center='circumcenter',create_cells=True,remove_1d=True)
-
-    # Need to get the rotated Q
-    en=g.edges_normals() # edge normals that go with Q on the original grid
-    enr=utils.rot(np.pi/2,en) 
-    dual_en=gd.edges_normals()
-    j_orig=gd.edges['dual_edge']
-    edge_sign_to_dual=np.round( (enr[j_orig]*dual_en).sum(axis=1) )
-    Qdual=hydro.Q.values[j_orig]*edge_sign_to_dual
-
-    Urot_dual=U_perot(gd,Qdual,gd.cells_area())
-
-    ds=gd.write_to_xarray()
-    ds['Q']=('edge',),Qdual
-    ds['u']=('face','xy'),Urot_dual
-    return ds
-
-def steady_streamline_oneway(g,Uc,x0,max_t=3600,max_steps=1000,
-                             u_min=1e-3):
-    """
-    Trace a streamline downstream 
-    g: unstructured grid
-    Uc: cell centered velocity vectors
-
-    returns Dataset with positions x, cells, times
-    """
-    # trace some streamlines
-    x0=np.asarray(x0)
-        
-    c=g.select_cells_nearest(x0,inside=True)
-    t=0.0 # steady field, start the counter at 0.0
-    edge_norm=g.edges_normals()
-    edge_ctr=g.edges_center()
-    x=x0.copy()
-    pnts=[x.copy()]
-    cells=[c]
-    times=[t]
-
-    e2c=g.edges['cells']
-    
-    while (t<max_t) and (c>=0):
-        dt_max_edge=np.inf # longest time step we're allowed based on hitting an edge
-        j_cross=None
-        c_cross=None # the cell that would be entered
-        j_cross_normal=None
-
-        for j in g.cell_to_edges(c):
-            if g.edges['cells'][j,1]==c: # ~checked
-                # normals point from cell 0 to cell 1
-                csgn=-1
-            else:
-                csgn=1
-
-            out_normal=csgn*edge_norm[j] # normal of edge j pointing away from cell c
-
-            d_xy_n = edge_ctr[j] - x # vector from xy to a point on the edge
-
-            # perpendicular distance
-            dp_xy_n=d_xy_n[0] * out_normal[0] + d_xy_n[1]*out_normal[1]
-
-            if dp_xy_n<0.0: # roundoff error
-                dp_xy_n=0.0
-
-            closing=Uc[c,0]*out_normal[0] + Uc[c,1]*out_normal[1]
-
-            # what cell would we be entering?
-            if e2c[j,0]==c:
-                nbr_c=e2c[j,1]
-            elif e2c[j,1]==c:
-                nbr_c=e2c[j,0]
-            else:
-                assert False
-
-            if closing<0: continue # moving away from that edge
-
-            # need to revisit this check
-            if len(cells)>1 and nbr_c==cells[-2]:
-                # print('Would be reentering cell %d.  Skip that option'%nbr_c)
-                continue
-
-            if (dp_xy_n==0.0) and (closing!=0.0):
-                print("On edge j=%d, dp_xy_n is zero, and closing is %f"%(j,closing))
-            dt_j=dp_xy_n/closing
-            if dt_j>0 and dt_j<dt_max_edge:
-                j_cross=j
-                c_cross=nbr_c
-                dt_max_edge=dt_j
-
-        t_max_edge=t+dt_max_edge
-        if t_max_edge>max_t:
-            # don't make it to the edge
-            dt=max_t-t
-            t=max_t
-            j_cross=None
-        else:
-            # this step will take us to the edge j_cross
-            dt=dt_max_edge
-            t=t_max_edge
-
-        # Take the step
-        delta=Uc[c]*dt
-        x += delta
-        pnts.append(x.copy())
-        cells.append(c)
-        times.append(t)
-
-        if j_cross is not None: # crossing an edge
-            c=c_cross
-            if c<0:
-                break
-
-            # with roundoff, good to make sure that we are properly on the
-            # line segment of j_cross
-            nodes=g.nodes['x'][ g.edges['nodes'][j_cross] ]
-            
-            tangent=nodes[1]-nodes[0]
-            edgelen=utils.mag(tangent)
-            tangent /= edgelen
-            
-            alpha=np.dot( x-nodes[0], tangent ) / edgelen
-            eps=1e-4
-            if alpha<eps: 
-                print('alpha correction %f => %f'%(alpha,eps))
-                alpha=1e-4
-            elif alpha>1-eps:
-                print('alpha correction %f => %f'%(alpha,1-eps))
-                alpha=1-eps
-            x=(1-alpha)*nodes[0] + alpha*nodes[1]
-            pnts[-1]=x.copy()
-            
-            umag=utils.mag(Uc[c])
-            if umag<=u_min:
-                # should only happen with rotate velocities
-                # means we hit shore.
-                break
-        if len(pnts)>=max_steps:
-            print("Stopping on max steps")
-            break
-
-    ds=xr.Dataset()
-    ds['time']=('time',),np.array(times)
-    ds['x']=('time','xy'),np.array(pnts)
-    ds['cell']=('time',),np.array(cells)
-    return ds
-
-def steady_streamline_twoways(g,Uc,x0):
-    """
-    Trace upstream and downstream with velocities Uc, concatenate
-    the results and return dataset.
-    """
-    ds_fwd=steady_streamline_oneway(g,Uc,x0)
-    ds_rev=steady_streamline_oneway(g,-Uc,x0)
-    ds_rev.time.values *= -1
-    return xr.concat( [ds_rev.isel(time=slice(None,None,-1)), ds_fwd],
-                      dim='time' )
+from stream_tracer import (steady_streamline_twoways, steady_streamline_oneway,
+                           rotated_hydro, StreamDistance)
+                           
 
 ##
 
@@ -306,39 +121,181 @@ U=hydro.u.values
 hydro_rot=rotated_hydro(hydro)
 g_rot=unstructured_grid.UnstructuredGrid.from_ugrid(hydro_rot)
 g_rot.edge_to_cells()
-U_rot=hydro_rot['u']
+U_rot=hydro_rot['u'].values
 
 ##
 
-# This works fine, with the exception of some convergent edges
-# that at least trace, though they don't look great.
-alongs=[]
-for s in source_ds.sample.values:
-    print(s)
-    x0=source_ds.x.values[s,:]
-    along=steady_streamline_twoways(g,U,x0)
-    alongs.append(along)
+tracks_fn='sparse-tracks2.pkl'
 
-acrosses=[]
-for s in source_ds.sample.values:
-    print(s)
+if not os.path.exists(tracks_fn):
+    # This works fine, with the exception of some convergent edges
+    # that at least trace, though they don't look great.
+    alongs=[]
+    for s in source_ds.sample.values:
+        print(s)
+        x0=source_ds.x.values[s,:]
+        along=steady_streamline_twoways(g,U,x0)
+        alongs.append(along)
+
+    acrosses=[]
+    for s in source_ds.sample.values:
+        print(s)
+
+        x0=source_ds.x.values[s,:]
+        across=steady_streamline_twoways(g_rot,U_rot,x0)
+        acrosses.append(across)
+
+    ##
+
+    import pickle
+    with open(tracks_fn,'wb') as fp:
+        pickle.dump( dict(acrosses=acrosses,alongs=alongs,hydro=hydro,hydro_rot=hydro_rot),
+                     fp )
+else:
+    with open(tracks_fn,'rb') as fp:
+        d=pickle.load(fp)
+        acrosses=d['acrosses']
+        alongs=d['alongs']
+        hydro=d['hydro']
+        hydro_rot=d['hydro_rot']
+        
+##
+
+if 0:
+    plt.figure(1).clf()
+    fig,ax=plt.subplots(1,1,num=1)
+
+    g.plot_edges(ax=ax,color='k',lw=0.3)
+
+    slc=slice(None,None,50)
+
+    ax.add_collection(collections.LineCollection([ds.x.values for ds in alongs[slc]],color='blue',
+                                                 lw=0.7))
+
+    ax.add_collection(collections.LineCollection([ds.x.values for ds in acrosses[slc]],color='green',
+                                                 lw=0.7))
+    ax.plot( source_ds.x.values[slc,0],source_ds.x.values[slc,1],'mo')
+
+##
+
+
+
+SD=StreamDistance(g=g,U=U,g_rot=g_rot,U_rot=U_rot,alongs=alongs,acrosses=acrosses)
+stream_distance=SD.stream_distance
+
+def samples_for_target(x_target,N=500):
+    x_along=steady_streamline_twoways(g,U,x_target)
+    x_across=steady_streamline_twoways(g_rot,U_rot,x_target)
+
+    # nearby source samples
+    dists=utils.mag( x_target-source_ds.x )
+    close_samples=np.argsort(dists)[:N]
+
+    close_distances=[]
+
+    for s in close_samples:
+        close_distances.append( stream_distance(x_target,s,
+                                                x_along=x_along,
+                                                x_across=x_across) )
+    close_distances=np.array(close_distances)
+    ds=xr.Dataset()
+    ds['target']=('xy',),x_target.copy()
+    ds['target_z']=(), dem(x_target)
+    ds['stream_dist']=('sample','st'),close_distances
+    ds['sample_z']=('sample',),source_ds.z.values[close_samples]
+    ds['sample_xy']=('sample','xy'),source_ds.x.values[close_samples]
+    return ds
+
+all_targets=[]
+cc=g.cells_center()
+for c in range(g.Ncells()):
+    print(c)
+    x_target=cc[c] + np.array([0.1,0.1])
+    target_samples=samples_for_target(x_target)
+    all_targets.append(target_samples)
     
-    x0=source_ds.x.values[s,:]
-    across=steady_streamline_twoways(g_rot,U_rot,x0)
-    acrosses.append(across)
 
-##
+import pickle
+with open('all-targets2.pkl','wb') as fp:
+    pickle.dump(all_targets, fp)
 
-plt.figure(1).clf()
-fig,ax=plt.subplots(1,1,num=1)
 
-g.plot_edges(ax=ax,color='k',lw=0.3)
+if 0:
+    zoom=(647327.9824278749, 647346.4060169846, 4185984.8153818697, 4186000.7397412914)
 
-slc=slice(None,None,50)
+    plt.figure(1).clf()
+    fig,ax=plt.subplots(1,1,num=1)
+    #g.plot_edges(ax=ax,color='k',lw=0.3)
+    g_rot.plot_edges(ax=ax,color='k',lw=0.3)
+    g_rot.plot_edges(ax=ax,color='k',lw=0.3,clip=zoom,labeler=lambda j,r: str(j))
+    g_rot.plot_cells(ax=ax,color='0.9',clip=zoom,labeler=lambda i,r: str(i),zorder=-2)
+    g_rot.plot_nodes(ax=ax,clip=zoom,labeler=lambda i,r: str(i),zorder=-1)
 
-ax.add_collection(collections.LineCollection([ds.x.values for ds in alongs[slc]],color='blue',
-                                             lw=0.7))
+    ax.plot(ds_rev.x.values[:,0],
+            ds_rev.x.values[:,1],
+            'g-o')
+    ax.plot( [x_target[0]],[x_target[1]],'ro')
 
-ax.add_collection(collections.LineCollection([ds.x.values for ds in acrosses[slc]],color='green',
-                                             lw=0.7))
-ax.plot( source_ds.x.values[slc,0],source_ds.x.values[slc,1],'mo')
+
+    ## 
+    plt.figure(1).clf()
+    fig,ax=plt.subplots(1,1,num=1)
+    g.plot_edges(ax=ax,color='k',lw=0.3)
+
+    ax.plot( source_ds.x.values[slc,0],source_ds.x.values[slc,1],'mo')
+
+    ax.plot( [x_target[0]],[x_target[1]],'ro')
+    scat=ax.scatter( source_ds.x.values[close_samples,0],
+                     source_ds.x.values[close_samples,1],
+                     30,close_distances[:,1] )
+    scat.set_clim([-40,40])
+    scat.set_cmap('seismic')
+    ax.axis( (647301.6747810617, 647489.8763778533, 4185618.735872294, 4185781.4072091985) )
+    ##
+
+    # Plot those in the plane:
+    plt.figure(2).clf()
+    fig,(ax,ax_dem)=plt.subplots(2,1,num=2)
+
+    valid=np.isfinite(close_distances[:,0])
+
+    f=field.XYZField( X=close_distances[valid],
+                      F=source_ds.z.values[close_samples][valid] )
+
+    clim=[f.F.min(),f.F.max()]
+
+    scat=ax.scatter(f.X[:,0],f.X[:,1],30,f.F,
+                    cmap='jet',clim=clim)
+
+    fg=f.to_grid(nx=500,ny=500,aspect=5)
+
+    fg.plot(zorder=-2,ax=ax,cmap='jet',clim=clim)
+
+    scat2=ax.scatter([0.0],[0.0],50,[dem(x_target)],
+                     cmap='jet')
+    scat2.set_clim(clim)
+
+    plt.colorbar(scat2)
+
+    # and plot things in geographical coordinates
+    sample_xy=source_ds.x.values[close_samples,:]
+    sample_axis=[sample_xy[:,0].min(),sample_xy[:,0].max(),
+                 sample_xy[:,1].min(),sample_xy[:,1].max()]
+    img=dem.crop(sample_axis).plot(ax=ax_dem,alpha=0.7)
+    img.set_clim(clim)
+    img.set_cmap('jet')
+
+    scat3=ax_dem.scatter( source_ds.x.values[close_samples,0],
+                          source_ds.x.values[close_samples,1],
+                          30,source_ds.z.values[close_samples] )
+    scat3.set_clim(clim)
+    scat3.set_cmap('jet')
+
+    ax_dem.plot( [x_target[0]],[x_target[1]],'mo')
+
+    ##
+
+    # some weird points that are on river left that show up as almost
+    # mid-channel.
+
+    g.Ncells()
