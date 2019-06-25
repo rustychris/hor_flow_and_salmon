@@ -123,7 +123,7 @@ StartFile		start.dat
 EddyViscosityFile	nut.dat
 ScalarDiffusivityFile	kappat.dat
 calcaverage 1
-ntaverage 3600
+ntaverage 1800
 averageNetcdfFile average.nc
 ########################################################################
 #
