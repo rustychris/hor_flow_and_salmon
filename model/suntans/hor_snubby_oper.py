@@ -10,6 +10,7 @@ log=logging.getLogger('hor_sun')
 log.setLevel(logging.INFO)
 
 import os
+import shutil
 import sys
 
 import matplotlib.pyplot as plt
@@ -26,15 +27,11 @@ import grid_roughness
 
 ##
 
-six.moves.reload_module(utils)
-six.moves.reload_module(dfm)
-six.moves.reload_module(unstructured_grid)
-six.moves.reload_module(drv)
-
 with open('local_config.py') as fp:
     exec(fp.read())
 
 ##
+os.path.exists(cache_dir) or os.makedirs(cache_dir)
 
 
 def base_model(run_dir,run_start,run_stop,
@@ -42,7 +39,7 @@ def base_model(run_dir,run_start,run_stop,
     if restart_from is None:
         model=drv.SuntansModel()
         model.load_template("sun-template.dat")
-        model.num_procs=4
+        model.num_procs=num_procs
     else:
         old_model=drv.SuntansModel.load(restart_from)
         model=old_model.create_restart()
@@ -69,10 +66,10 @@ def base_model(run_dir,run_start,run_stop,
 
         model.config['nonlinear']=1
 
-        if 1:
+        if 0:
             model.config['Nkmax']=1
             model.config['stairstep']=0 
-        if 0:
+        if 1:
             model.config['Nkmax']=50
             model.config['stairstep']=1 # 3D, stairstep
         
@@ -84,6 +81,7 @@ def base_model(run_dir,run_start,run_stop,
         model.config['CdW']=0.0
         model.config['wetdry']=1
         model.config['maxFaces']=4
+        model.config['mergeArrays']=1 # hopefully easier to use than split up.
 
         grid_src="../grid/snubby_junction/snubby-01.nc"
         grid_bathy="snubby-with_bathy.nc"
@@ -106,15 +104,11 @@ def base_model(run_dir,run_start,run_stop,
 
     model.add_gazetteer("../grid/snubby_junction/forcing-snubby-01.shp")
 
-    # HERE -- these need some data filling.
-    # mossdale flow has some nan, which should be filled.
-    # something like:
-    #   da_fill=utils.fill_tidal_data( ds.boundary_Q.isel(Nseg=0),fill_time=False )
-    # should get most of the way there
-
     def fill(da):
         return utils.fill_tidal_data(da,fill_time=False)
-    
+
+    # TODO: switch to water library for better QA
+
     # Would like to ramp these up at the very beginning.
     # Mossdale, tested at 220.0 m3/s
     Q_upstream=drv.CdecFlowBC(name="SJ_upstream",station="MSD",dredge_depth=None,
@@ -122,12 +116,11 @@ def base_model(run_dir,run_start,run_stop,
                               cache_dir=cache_dir)
     # San Joaquin above Dos Reis, tested at -100
     # flip sign to get outflow.
-
     Q_downstream=drv.CdecFlowBC(name="SJ_downstream",station="SJD",dredge_depth=None,
                                 filters=[dfm.Transform(fn=lambda x: -x,fn_da=fill)],
                                 cache_dir=cache_dir)
     h=np.timedelta64(1,'h')
-    
+
     h_old_river=drv.CdecStageBC(name='Old_River',station="OH1",cache_dir=cache_dir)
 
     model.add_bcs([Q_upstream,Q_downstream,h_old_river])
@@ -156,32 +149,49 @@ def base_model(run_dir,run_start,run_stop,
 if __name__=='__main__':
     # range of tag data is
     # 2018-03-16 23:53:00 to 2018-04-11 14:11:00
-    multi_run_start=np.datetime64("2018-03-16 00:00")
+    # for ptm output, start a bit earlier
+    multi_run_start=np.datetime64("2018-03-10 00:00")
     multi_run_stop=np.datetime64("2018-04-12 00:00")
 
     run_start=multi_run_start
     print(run_start)
 
     # series of 1-day runs
+    # run_interval=np.timedelta64(1,'D')
+    # But restarts are not good with average output.
+    # Kludge it and run the whole period in one go.
+    run_interval=multi_run_stop-run_start
+    
     run_count=0
     last_run_dir=None
     while run_start < multi_run_stop:
-        run_stop=run_start+np.timedelta64(1,'D')
+        run_stop=run_start+run_interval
         print(run_start,run_stop)
         date_str=utils.to_datetime(run_start).strftime('%Y%m%d')
         # cfg000: first go
-        # Cfg001: 2D
-
-        run_dir="runs/snubby_cfg001_%s"%date_str
+        # cfg001: 2D
+        # cfg002: 3D
+        # cfg003: fix grid topology in suntans, and timesteps
+        # cfg004: run in one go, rather than daily restarts.
+        
+        run_dir="runs/snubby_cfg004_%s"%date_str
 
         if not drv.SuntansModel.run_completed(run_dir):
             model=base_model(run_dir,run_start,run_stop,
                              restart_from=last_run_dir)
             model.sun_verbose_flag="-v"
+            try:
+                script=__file__
+            except NameError:
+                script=None
+            if script:
+                shutil.copyfile(script,os.path.join(model.run_dir,script))
+            else:
+                print("Could not copy script")
             model.run_simulation()
         run_count+=1
         last_run_dir=run_dir
-        run_start+=np.timedelta64(1,'D')
+        run_start=run_stop
 
 
 
