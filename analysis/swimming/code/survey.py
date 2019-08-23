@@ -1,9 +1,11 @@
 # survey.py
 # ed
 # methods for dealing with an acoustic telemetry survey
+from __future__ import print_function
 
 import sys, os
 import numpy as np
+from collections import defaultdict
 import pylab
 from osgeo import ogr
 import pandas as pd
@@ -22,6 +24,7 @@ import pdb
 
 cm_red = plt.get_cmap('autumn_r')
 
+## 
 # helper functions
 def get_lines_from_shp(shp):
     ods = ogr.Open(shp)
@@ -32,13 +35,13 @@ def get_lines_from_shp(shp):
     for i in range(nlines):
         feat = layer.GetNextFeature()
         if not feat:
-            raise "Expected more lines, but the layer stopped giving"
+            raise Exception("Expected more lines, but the layer stopped giving")
         
         fid = feat.GetFID()
         geo = feat.GetGeometryRef() 
 
         if geo.GetGeometryName() != 'LINESTRING':
-            raise Exception,"All features must be lines"
+            raise Exception("All features must be lines")
 
         # read the points into a numpy array:
         geom = shapely.wkb.loads(geo.ExportToWkb())
@@ -65,7 +68,7 @@ def load_comma_formatted(data_fn, column_name):
     for i in range(nheader):
         header = fp.readline().split(',')
     nc = header.index(column_name)
-    print "nc: ",nc
+    print("nc: ",nc)
     dtime = []
     q = []
     
@@ -171,7 +174,7 @@ class Survey(object):
             self.names.append(name)
             geo = feat.GetGeometryRef() 
             if geo.GetGeometryName() != 'POLYGON':
-                raise Exception,"Features must be polygons"
+                raise Exception("Features must be polygons")
             poly = shapely.wkb.loads(geo.ExportToWkb())
             self.polys.append(poly)
  
@@ -241,7 +244,7 @@ class Survey(object):
             tracks = self.tracks.keys()
         for nt, key in enumerate(tracks):
             tr = self.tracks[key]
-            print "tr, nd",tr.ID, tr.ndetects
+            print("tr, nd",tr.ID, tr.ndetects)
             if tr.valid:
                 if masked:
                     mask = tr.get_mask(methods=self.outlier_methods)
@@ -319,7 +322,7 @@ class Survey(object):
                                       changepts=False):
         """ plot information related to a single track/tag """
         if time_series and histograms:
-            print "Cannot select both time_series and histograms in speed plot"
+            print("Cannot select both time_series and histograms in speed plot")
             return
         if tracks == None:
             tracks = self.tracks.keys()
@@ -398,7 +401,7 @@ class Survey(object):
         self.outlier_methods = methods
         self.outlier_params = params
         for nt, key in enumerate(self.tracks.keys()):
-            print key
+            print(key)
             tr = self.tracks[key]
             tr.identify_outliers(methods, params)
 #           if 'Iterative' in outlier_methods:
@@ -447,7 +450,7 @@ class Survey(object):
                                                     df_track])
                     self.df_all_segs = pd.concat([self.df_all_segs, df_seg])
                     self.df_all_swim = pd.concat([self.df_all_swim, df_swim])
-        if fnames==None:
+        if fnames is None:
             fnames.append('tracks.csv')
             fnames.append('segments.csv')
             fnames.append('swim.csv')
@@ -798,7 +801,7 @@ class Survey(object):
                     xy = get_intersect(a1,a2,b1,b2)
                     if b1[0] < xy[0] < b2[0]:
                         frac = (xy[0] - b1[0])/(b2[0] - b1[0])
-                        print "lkey, key, ns, frac",lkey,key,ns,frac
+                        print( "lkey, key, ns, frac",lkey,key,ns,frac)
                         fraction[lkey].append(frac)
 
             ncross = len(fraction[lkey])
@@ -1009,7 +1012,7 @@ class Survey(object):
     def calculate_quality_metrics(self, masked=False, tracks=None):
         """ calculate metrics of overall track, as opposed to 
             individual detection, quality """
-        metrics = {}
+        metrics = defaultdict(list) # {}
         if tracks is None:
             tracks = self.tracks.keys()
         for nt, key in enumerate(tracks):
@@ -1022,12 +1025,12 @@ class Survey(object):
                     tr.total_outlier_flag()
             mnames, metrics_tr = tr.track_quality_metrics(masked=masked)
             for nn, mname in enumerate(mnames):
-                if nt == 0:
-                    metrics[mname] = []
                 metrics[mname].append(metrics_tr[nn])
 
         df_metrics = pd.DataFrame.from_dict(metrics)
         metrics_csv = os.path.join(self.csv_dir, 'metrics.csv')
+        if not os.path.exists(self.csv_dir):
+            os.makedirs(self.csv_dir)
         df_metrics.to_csv(metrics_csv, index=False)
         self.df_metrics = df_metrics 
 
@@ -1152,18 +1155,20 @@ class Survey(object):
                 self.yellows.append('noisy')
         ax.text(t2xy[0], t2xy[1], t2, transform=ax.transAxes, color=c2)
 
-if __name__ == '__main__':
-    lines_shp_file = r'R:\UCD\Projects\CDFW_Klimley\GIS\transit_lines.shp'
-    lines = get_lines_from_shp(lines_shp_file)
-    flow_fn = 'bc_flows.csv'
-    dtime_msd, q_msd = load_comma_formatted(flow_fn,'MSD')
-    dnums_msd = pylab.date2num(dtime_msd)
-    filename = r'R:\UCD\Projects\CDFW_Klimley\Observations\telemetry\cleaned_half_meter.csv'
+if True: # __name__ == '__main__':
+    #lines_shp_file = r'R:\UCD\Projects\CDFW_Klimley\GIS\transit_lines.shp'
+    #lines = get_lines_from_shp(lines_shp_file)
+    #flow_fn = 'bc_flows.csv'
+    #dtime_msd, q_msd = load_comma_formatted(flow_fn,'MSD')
+    dnums_msd=None # disable for now
+    #dnums_msd = pylab.date2num(dtime_msd)
+
+    filename = 'cleaned_half_meter.csv'
 #   filename = r'R:\UCD\Projects\CDFW_Klimley\Observations\telemetry\8294.csv'
     grd_file = 'FISH_PTM.grd'
-    shp_file = r'R:\UCD\Projects\CDFW_Klimley\GIS\receiver_range_polygon.shp'
-    fig_dir = r'R:\UCD\Projects\CDFW_Klimley\Analysis\python\Telemetry\figs_trusted'
-    csv_dir = r'R:\UCD\Projects\CDFW_Klimley\Analysis\python\Telemetry\csv'
+    shp_file = 'receiver_range_polygon.shp'
+    fig_dir = 'figs_trusted'
+    csv_dir = 'csv'
     hydro_fname = 'segments_2m-model20190314.csv'
     outlier_methods = ['Poly','Dry','Iterative']
     #outlier_params = [[sur.names,sur.polys],[-3.0],[2.0]]
@@ -1176,8 +1181,8 @@ if __name__ == '__main__':
         outlier_params = [[sur.names,sur.polys],[-3.0],[2.0]]
         sur.identify_outliers(outlier_methods, outlier_params)
         sur.calc_autocorr(masked=True)
-        sys.exit(0) # hardwire for now
-    debug = True
+        raise Exception("Bailing out") # sys.exit(0) # hardwire for now
+    debug = False
     if debug:
         # debug first clean point in track 8294
         trusted_tracks=['8294']
@@ -1186,13 +1191,16 @@ if __name__ == '__main__':
         sur.read_receiver_locations(fname='2018 surveyed_rcv_pos.csv')
         sur.speed_over_ground(masked=False)
         outlier_params = [[sur.names,sur.polys],[-3.0],[2.0]]
-        print "call identify outliers"
+        print( "call identify outliers")
         sur.identify_outliers(outlier_methods, outlier_params)
         sur.calc_smoothed(masked=True)
         sur.swimming_speed(hydro_fname, tracks=trusted_tracks)
-        sur.write_to_csvs(fnames=['tag8294.csv','tag8294_seg.csv'],
+        tag=trusted_tracks[0]
+        sur.write_to_csvs(fnames=['tag%s.csv'%tag,
+                                  'tag%s_seg.csv'%tag,
+                                  'tag%s_swim.csv'%tag],
                           add_smooth=False)
-        sys.exit(0)
+        raise Exception("Debug output enabled - bailing out")
 
     # screen tracks
     process_all_tracks = True
@@ -1249,7 +1257,7 @@ if __name__ == '__main__':
     sur.calc_smoothed(masked=True)
     plot_cleaned = False
     if plot_cleaned:
-        print "plot cleaned"
+        print( "plot cleaned")
         sur.plot_pos_single_track(variable='position', color_by='age',
                                   plot_noise=False, plot_smoothed=False,
                                   plot_outliers=False, plot_masked_only=True,
@@ -1257,7 +1265,7 @@ if __name__ == '__main__':
                                   fig_dir='plot_cleaned_trusted')
     plot_smoothed = False
     if plot_smoothed:
-        print "plot smoothed"
+        print( "plot smoothed")
         sur.plot_pos_single_track(variable='position', color_by='age',
                                   plot_noise=False, plot_smoothed=True,
                                   plot_outliers=False, plot_masked_only=True,
@@ -1267,7 +1275,7 @@ if __name__ == '__main__':
     sur.find_change_points_fill(tracks=trusted_tracks)
     plot_changepts = False
     if plot_changepts:
-        print "plot changepoints"
+        print( "plot changepoints")
         sur.plot_pos_single_track(variable='position', color_by='age',
                                   plot_noise=False, plot_smoothed=True,
                                   plot_outliers=False, plot_masked_only=True,
@@ -1276,7 +1284,7 @@ if __name__ == '__main__':
                                   fig_dir='plot_changepts_trusted')
     plot_changepts_fill = False
     if plot_changepts_fill:
-        print "plot changepoints_fill"
+        print( "plot changepoints_fill")
         sur.plot_pos_single_track(variable='position', color_by='age',
                                   plot_noise=False, plot_smoothed=True,
                                   plot_outliers=False, plot_masked_only=True,
@@ -1288,7 +1296,7 @@ if __name__ == '__main__':
     sur.speed_over_ground(masked=True)
     plot_speed = False
     if plot_speed:
-        print "plot speed over ground"
+        print( "plot speed over ground")
         sur.plot_speed_single_track(variable='speed_over_ground', 
                                     color_by='age',
                                     show_metrics=False,
@@ -1300,7 +1308,7 @@ if __name__ == '__main__':
     sur.swimming_speed(hydro_fname, tracks=trusted_tracks)
     plot_swim = False
     if plot_swim:
-        print "plot swimming speed"
+        print( "plot swimming speed")
         sur.plot_speed_single_track(variable='swimming_speed', 
                                     plot_detects=False,
                                     show_metrics=False,
@@ -1310,7 +1318,7 @@ if __name__ == '__main__':
                                     tracks=trusted_tracks)
     plot_hydro = False
     if plot_hydro:
-        print "plot hydro speed"
+        print( "plot hydro speed")
         sur.plot_speed_single_track(variable='hydro_speed', 
                                     plot_detects=False,
                                     show_metrics=False,
@@ -1319,13 +1327,17 @@ if __name__ == '__main__':
                                     masked=True,
                                     tracks=trusted_tracks)
 
-#   sur.calc_crossings(lines, tracks=trusted_tracks)
-#   sur.plot_transit_times_z(tracks=trusted_tracks)
-    sur.plot_transit_times_flow(tracks=trusted_tracks, 
-                                dnums_q=dnums_msd, q=q_msd)
+    #   sur.calc_crossings(lines, tracks=trusted_tracks)
+    #   sur.plot_transit_times_z(tracks=trusted_tracks)
+    if dnums_msd is not None:
+        sur.plot_transit_times_flow(tracks=trusted_tracks, 
+                                    dnums_q=dnums_msd, q=q_msd)
+    else:
+        print("-"*20 + "No transit time -- missing dnums_msd" + "-"*20)
+            
     output_summary = False
     if output_summary:
-        print "integrated plots"
+        print( "integrated plots")
 #       sur.plot_study_area()
 #       sur.write_to_csvs(fnames=['tracks_2.csv','segments_2.csv'])
         sur.write_to_csvs(fnames=['tracks_2m.csv','segments_2m.csv',

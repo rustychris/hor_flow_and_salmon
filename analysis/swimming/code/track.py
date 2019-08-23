@@ -98,7 +98,9 @@ class Track(object):
                 xy = [self.df_track['X'].values[nd],
                       self.df_track['Y'].values[nd]]
                 i = grd.select_cells_nearest(xy, inside=True)
-                if i >= 0:
+                # seems the interface may have changed -- test
+                # both ways
+                if (i is not None) and (i>=0):
                     idetect[nd] = i
                     depth[nd] = grd.cells['depth'][i]
             self.df_track = self.df_track.assign(depth = depth)
@@ -198,7 +200,7 @@ class Track(object):
             seg = self.rec_seg
             headings = seg.head
         ndetects = len(headings) + 1
-        halfres = window/2
+        halfres = int(window/2)
         circ_std = np.zeros(ndetects, np.float64)
         circ_var = np.zeros(ndetects, np.float64)
         circ_avg = np.zeros(ndetects, np.float64)
@@ -247,7 +249,7 @@ class Track(object):
         if 'Iterative' in methods: # need to do this first
             nit = self.outlier_methods.index('Iterative')
             max_del_vel = self.outlier_params[nit][0]
-            print "calling id outliers it"
+            print("calling id outliers it")
             self.identify_outliers_iterative(max_del_vel)
         if 'Poly' in methods: # need to do this second
             # assumes that Dry and Iterative flags have been set
@@ -394,12 +396,14 @@ class Track(object):
         if 'Dry' in self.outlier_methods:
             flagged = self.rec_track['Dry']
         # moved Iterative BEFORE Poly
-#       if 'Poly' in self.outlier_methods:
-#           flagged = np.logical_or(self.rec_track['Poly'], flagged)
-        dv_final = self.del_velocity() # initialize
+        #       if 'Poly' in self.outlier_methods:
+        #           flagged = np.logical_or(self.rec_track['Poly'], flagged)
+        # del-velocity is one shorter, so leave last entry as 0
+        # dv_final[i] is then change from i to i+1
+        dv_final[:-1] = self.del_velocity() # initialize
         niterations = 5
         for nit in range(0,niterations):
-            print "nit", nit
+            print("nit", nit)
             not_flagged = np.where(flagged==0)[0]
             valid_tr = self.rec_track[not_flagged]
             # compute segments associated with valid detects
@@ -417,8 +421,6 @@ class Track(object):
                         flagged[nd_orig] = 1
                         if del_vel[nd] > del_vel[nd-1]:
                             flagged[nd_minus1_orig] = 0 
-
-            pdb.set_trace()
         ncol = len(self.df_track.columns)
         self.df_track.insert(ncol, 'Iterative', flagged)
         ncol = len(self.df_track.columns)
@@ -469,7 +471,7 @@ class Track(object):
             will be returned. Otherwise all detections will
             be analyzed and the segment record added to self """ 
         grd = self.grd
-        if input_rec_track == None:
+        if input_rec_track is None:
             rec_track = self.rec_track
         else:
             rec_track = input_rec_track
@@ -541,6 +543,7 @@ class Track(object):
             for ns in range(nsegments):
                 xy = [xm[ns], ym[ns]]
                 i = grd.select_cells_nearest(xy, inside=True)
+                if i is None: i=-1
                 idetect[ns] = i
                 if i >= 0:
                     depth[ns] = grd.cells['depth'][i]
@@ -548,7 +551,7 @@ class Track(object):
             df_seg = df_seg.assign(i = idetect)
 
         rec_seg = df_seg.to_records()
-        if (input_rec_track == None) or overwrite_rec_seg:
+        if (input_rec_track is None) or overwrite_rec_seg:
             self.df_seg = copy.deepcopy(df_seg)
             self.rec_seg = copy.deepcopy(rec_seg)
             return
@@ -626,6 +629,7 @@ class Track(object):
         del_vel = self.del_velocity(input_rec_track = self.rec_smooth_pos)
         change_pt_flag3[1:] = del_vel > del_vel_threshold 
         self.df_smooth_pos = self.df_smooth_pos.assign(change_pt_flag3=change_pt_flag3)
+        print("DBG: replacing rec_smooth_pos")
         self.rec_smooth_pos = self.df_smooth_pos.to_records()
         
         return
@@ -648,14 +652,14 @@ class Track(object):
         nfill = len(rec_fill)
         nseg = nfill - 1
         window = 12
-        cvar, cavg = self.circular_std_dev(window=window/2, headings=segs.head)
+        cvar, cavg = self.circular_std_dev(window=int(window/2), headings=segs.head)
         change_pt = np.zeros(nfill, np.bool_)
         change_pt0 = np.zeros(nfill, np.bool_)
         p_stat = np.ones(nfill, np.float64)
         small_cstd = 0.1*np.pi
-        for nf in range(window/2+1,nfill-window/2-1):
-            nf_before = nf - window/4
-            nf_after  = nf + window/4
+        for nf in range(int(window/2+1),int(nfill-window/2-1)):
+            nf_before = int(nf - window/4)
+            nf_after  = int(nf + window/4)
             cb = cavg[nf_before]
             ca = cavg[nf_after]
             #dy = np.sin(cb - ca)
@@ -687,11 +691,11 @@ class Track(object):
             #print self.ID, nd, df, del_avg, cstd, t_stat, p_stat[nf]
             #change_pt[nf] = abs(del_avg) > 3.*avg_std
             change_pt0[nf] = p_stat[nf] < 0.05
-        for nf in range(window/2+1,nfill-window/2-1):
+        for nf in range(int(window/2+1),int(nfill-window/2-1)):
             # flag current point only if it is the smallest p_stat in window
             if change_pt0[nf]:
-                nf_before = nf - window/4
-                nf_after  = nf + window/4
+                nf_before = nf - int(window/4)
+                nf_after  = nf + int(window/4)
                 nf_min = np.argmin(p_stat[nf_before:nf_after])
                 if nf == nf_min + nf_before:
                     change_pt[nf] = True
@@ -832,11 +836,15 @@ class Track(object):
         tdm = rec_track.Sec[mask]
         xm = rec_track.X[mask]
         ym = rec_track.Y[mask]
+        zm = rec_track.Z[mask]
+        
         ndetects = len(tdm)
         xs = np.nan*np.ones(ndetects, np.float64)
         ys = np.nan*np.ones(ndetects, np.float64)
+        zs = np.nan*np.ones(ndetects, np.float64)
         xd = np.nan*np.ones(ndetects, np.float64)
         yd = np.nan*np.ones(ndetects, np.float64)
+        zd = np.nan*np.ones(ndetects, np.float64)
         noise = np.nan*np.ones(ndetects, np.float64)
         nsmooth = np.nan*np.ones(ndetects, np.int32)
         for nd in range(ndetects):
@@ -847,19 +855,26 @@ class Track(object):
             if ndet < 1: # give up
                 xs[nd] = xm[nd]
                 ys[nd] = ym[nd]
+                zs[nd] = zm[nd]
             else:
                 m, b, r, p, se = stats.linregress(tsm, xm[idet])
                 xs[nd] = m*tdm[nd] + b 
                 m, b, r, p, se = stats.linregress(tsm, ym[idet])
                 ys[nd] = m*tdm[nd] + b 
+                m, b, r, p, se = stats.linregress(tsm, zm[idet])
+                zs[nd] = m*tdm[nd] + b 
             xd[nd] = xs[nd] - xm[nd]
             yd[nd] = ys[nd] - ym[nd]
+            zd[nd] = zs[nd] - zm[nd]
+            # Exclude Z from noise estimate -- no sense yet of how
+            # good/bad Z is.
             noise[nd] = np.sqrt(xd[nd]*xd[nd] + yd[nd]*yd[nd])
         # variables for filled and smoothed track
         duration = tdm[-1] - tdm[0]
         nfilled = int(np.rint(duration/5.)) + 1
         xf = np.nan*np.ones(nfilled, np.float64)
         yf = np.nan*np.ones(nfilled, np.float64)
+        zf = np.nan*np.ones(nfilled, np.float64)
         tf = np.nan*np.ones(nfilled, np.float64)
         dnumf = np.nan*np.ones(nfilled, np.float64)
         tint = 5.
@@ -879,22 +894,26 @@ class Track(object):
                 if ndet >= 1:
                     mx, bx, r, p, se = stats.linregress(tsm, xm[idet])
                     my, by, r, p, se = stats.linregress(tsm, ym[idet])
+                    mz, bz, r, p, se = stats.linregress(tsm, zm[idet])
                 nd_last = nd
             if ndet < 1: # give up
                 xf[nf] = xm[nd]
                 yf[nf] = ym[nd]
+                zf[nf] = zm[nd]
             else:
                 xf[nf] = mx*tf[nf] + bx
                 yf[nf] = my*tf[nf] + by 
+                zf[nf] = mz*tf[nf] + bz 
 
-        self.df_smooth_pos = pd.DataFrame({'X':xs, 'Y':ys,
+        self.df_smooth_pos = pd.DataFrame({'X':xs, 'Y':ys, 'Z':zs,
                                            'Sec':rec_track.Sec[mask], 
                                            'dnums':rec_track.dnums[mask],
-                                           'xd':xd, 'yd':yd, 
+                                           'xd':xd, 'yd':yd, 'zd':zd,
                                            'nsmooth':nsmooth,
                                            'noise':noise})
         rec_smooth_pos = self.df_smooth_pos.to_records()
-        self.df_smooth_fill = pd.DataFrame({'X':xf, 'Y':yf, 'Sec':tf, 
+        self.df_smooth_fill = pd.DataFrame({'X':xf, 'Y':yf, 'Z':zf,
+                                            'Sec':tf, 
                                             'dnums':dnumf})
         # set self.rec_smooth_fill always (even if input_rec_track is given)
         self.rec_smooth_fill = self.df_smooth_fill.to_records()
@@ -940,7 +959,7 @@ class Track(object):
         for nd in range(len(xnd)):
             xy = [xnd[nd], ynd[nd]]
             i = grd.select_cells_nearest(xy)
-            if i >= 0:
+            if (i is not None) and (i >= 0):
                 non_detects_i_tr[i] += 1
 
         return non_detects_i_tr
@@ -1023,8 +1042,8 @@ class Track(object):
 #       return del_vel
 
     def del_velocity(self, mask=None, input_rec_track=None):
-        """ computer metrics of segment to segment velocity variability """
-        if input_rec_track == None:
+        """ compute metrics of segment to segment velocity variability """
+        if input_rec_track is None:
             self.nsegments = self.ndetects - 1
             rec_track = self.rec_track
         else:
@@ -1343,7 +1362,7 @@ class Track(object):
                                             scale=params[2])
                 ax.plot(x, pdf_fit, color='k', **kwargs)
             except:
-                print "lognormal fit failed for ",self.ID
+                print("lognormal fit failed for ",self.ID)
             # fit normal
             ax.plot(x, mlab.normpdf(x, mu, sigma), color='b', **kwargs)
 
