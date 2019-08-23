@@ -1155,13 +1155,19 @@ class Survey(object):
                 self.yellows.append('noisy')
         ax.text(t2xy[0], t2xy[1], t2, transform=ax.transAxes, color=c2)
 
+
 if True: # __name__ == '__main__':
     #lines_shp_file = r'R:\UCD\Projects\CDFW_Klimley\GIS\transit_lines.shp'
     #lines = get_lines_from_shp(lines_shp_file)
-    #flow_fn = 'bc_flows.csv'
-    #dtime_msd, q_msd = load_comma_formatted(flow_fn,'MSD')
-    dnums_msd=None # disable for now
-    #dnums_msd = pylab.date2num(dtime_msd)
+    if 0:
+        flow_fn = 'bc_flows.csv'
+        dtime_msd, q_msd = load_comma_formatted(flow_fn,'MSD')
+        dnums_msd = pylab.date2num(dtime_msd)
+    else:
+        local_csv='msd_2018.csv'
+        df=pd.read_csv('msd_flow_2018.csv')
+        q_msd=df['q_cms'].values
+        dnums_msd=df['dnum'].values
 
     filename = 'cleaned_half_meter.csv'
 #   filename = r'R:\UCD\Projects\CDFW_Klimley\Observations\telemetry\8294.csv'
