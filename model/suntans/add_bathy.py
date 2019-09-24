@@ -19,10 +19,9 @@ def add_bathy(g):
 
     # For this high resolution grid don't worry so much
     # about averaging or getting clever about bathymetry
-    g.add_node_field('node_depth', eval_pnts(g.nodes['x']), on_exists='overwrite')
-    g.add_edge_field('edge_depth', eval_pnts(g.edges_center()),on_exists='overwrite')
-    g.add_cell_field('cell_depth', eval_pnts(g.cells_center()),on_exists='overwrite')
-    g.add_cell_field('depth', g.cells['cell_depth'])
+    g.add_node_field('node_z_bed', eval_pnts(g.nodes['x']), on_exists='overwrite')
+    g.add_edge_field('edge_z_bed', eval_pnts(g.edges_center()),on_exists='overwrite')
+    g.add_cell_field('z_bed', eval_pnts(g.cells_center()),on_exists='overwrite')
 
     return g
 

@@ -4,3 +4,6 @@ snubby-doubled*.nc
 snubby-with_bathy.nc
 local_config.py
 cache
+snubby-with_bathy.nc
+.ipynb_checkpoints
+log*

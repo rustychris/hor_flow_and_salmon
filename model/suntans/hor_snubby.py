@@ -9,6 +9,7 @@ log=logging.getLogger('hor_sun')
 log.setLevel(logging.INFO)
 
 import os
+import shutil
 import sys
 
 import matplotlib.pyplot as plt
@@ -20,13 +21,16 @@ from stompy.spatial import wkb2shp, field
 from stompy.grid import unstructured_grid
 
 from stompy.model.suntans import sun_driver as drv
+import stompy.model.delft.dflow_model as dfm
+import add_bathy
+import grid_roughness
+
 ##
 
-import stompy.model.delft.dflow_model as dfm
-six.moves.reload_module(utils)
-six.moves.reload_module(dfm)
-six.moves.reload_module(unstructured_grid)
-six.moves.reload_module(drv)
+with open('local_config.py') as fp:
+    exec(fp.read())
+
+##
 
 model=drv.SuntansModel()
 model.projection="EPSG:26910"
@@ -78,7 +82,7 @@ model.run_start=np.datetime64('2017-03-01 00:00:00')
 model.run_stop=np.datetime64('2017-03-01 04:00:00')
 ramp_hours=1 # how quickly to increase the outflow
 
-model.config['Nkmax']=25
+model.config['Nkmax']=50
 
 dt=0.5
 model.config['dt']=dt
@@ -97,6 +101,7 @@ model.config['nu']=1e-5
 model.config['turbmodel']=10 # 1: my25, 10: parabolic
 model.config['CdW']=0.0
 model.config['wetdry']=1
+model.config['maxFaces']=4
 
 grid_src="../grid/snubby_junction/snubby-01.nc"
 grid_bathy="snubby-with_bathy.nc"
