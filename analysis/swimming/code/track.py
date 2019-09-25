@@ -629,7 +629,6 @@ class Track(object):
         del_vel = self.del_velocity(input_rec_track = self.rec_smooth_pos)
         change_pt_flag3[1:] = del_vel > del_vel_threshold 
         self.df_smooth_pos = self.df_smooth_pos.assign(change_pt_flag3=change_pt_flag3)
-        print("DBG: replacing rec_smooth_pos")
         self.rec_smooth_pos = self.df_smooth_pos.to_records()
         
         return
@@ -1289,12 +1288,16 @@ class Track(object):
         """ plot scatter of swim velocity in coordinates relative to hydro """
         rec_swim = self.rec_swim
         nsegments = len(rec_swim)
+
         swim_u = rec_swim.swim_u
         swim_v = rec_swim.swim_v
         u_rel,v_rel = self.vel_from_hydro(vel=[swim_u,swim_v], 
                                           rec_swim=rec_swim)
         #swim_spd = self.rec_swim['swim_spd']
 
+        if nsegments==0:
+            print("Tag %s has no segments. Skipping plot_swim_vel_scatter"%self.ID)
+            return
         time_from_entry = rec_swim.tm - rec_swim.tm[0] + 1
         log_age = np.log10(time_from_entry)
         scat = ax1.scatter(u_rel, v_rel, marker='o', s=2.0, c=log_age)

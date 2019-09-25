@@ -9,7 +9,12 @@ from collections import defaultdict
 import pylab
 from osgeo import ogr
 import pandas as pd
+import track
+
+import six
+six.moves.reload_module(track)
 from track import Track
+
 from datetime import datetime
 import matplotlib.pyplot as plt
 import matplotlib.colors as colors
@@ -326,7 +331,7 @@ class Survey(object):
             return
         if tracks == None:
             tracks = self.tracks.keys()
-        #for nt, key in enumerate(self.tracks.keys()):
+
         for nt, key in enumerate(tracks):
             plt.close()
             fig = plt.figure()
@@ -392,7 +397,7 @@ class Survey(object):
             if fig_dir == None:
                 fig_dir = self.default_fig_dir
             fig_name = os.path.join(fig_dir, '%s_%s.png'%(key,variable))
-
+            os.path.exists(fig_dir) or os.makedirs(fig_dir)
             plt.savefig(fig_name, dpi=800)
 
         return
@@ -550,6 +555,7 @@ class Survey(object):
             # save figure
             if fig_dir == None:
                 fig_dir = self.default_fig_dir
+            os.path.exists(fig_dir) or os.makedirs(fig_dir)
             fig_name = os.path.join(fig_dir, '%s_pos.png'%(key))
             plt.savefig(fig_name, dpi=800)
 
@@ -1170,7 +1176,7 @@ if True: # __name__ == '__main__':
         dnums_msd=df['dnum'].values
 
     filename = 'cleaned_half_meter.csv'
-#   filename = r'R:\UCD\Projects\CDFW_Klimley\Observations\telemetry\8294.csv'
+    # filename = r'R:\UCD\Projects\CDFW_Klimley\Observations\telemetry\8294.csv'
     grd_file = 'FISH_PTM.grd'
     shp_file = 'receiver_range_polygon.shp'
     fig_dir = 'figs_trusted'
@@ -1178,6 +1184,8 @@ if True: # __name__ == '__main__':
     hydro_fname = 'segments_2m-model20190314.csv'
     outlier_methods = ['Poly','Dry','Iterative']
     #outlier_params = [[sur.names,sur.polys],[-3.0],[2.0]]
+
+    os.path.exists(fig_dir) or os.makedirs(fig_dir)
 
     autocorr = False
     if autocorr:
@@ -1209,7 +1217,7 @@ if True: # __name__ == '__main__':
         raise Exception("Debug output enabled - bailing out")
 
     # screen tracks
-    process_all_tracks = True
+    process_all_tracks = False 
     if process_all_tracks:
         sur = Survey(filename, grd_file, shp_file) # read survey ALL TRACKS
         sur.set_directories(default_fig_dir=fig_dir, csv_dir=csv_dir)
@@ -1248,12 +1256,26 @@ if True: # __name__ == '__main__':
 
 
     # From here down restart to work with "trusted tracks"
-# manualy selected tracks
-#   trusted_tracks=['7265','72d1','74a1','74ab','7528','752b','7566','7567','7629','7659','768a','76b1','76b7','772a','7895','796d','79ab','7a85','7a96','7a99','7b49','7b4b','7b65','7ba9','7ca5','7d29','7dd5','8255','8292','7435']
-# screening based on fraction detects 
-#   trusted_tracks = ['8255', '7c55', '796d', '75d3', '75d5', '7af5', '752b', '7454', '768a', '7ca5', '7615', '7a85', '7d65', '76da', '7b49', '725b', '7cb5', '7a99', '7d55', '76d3', '7256', '769a', '76d9', '7a96', '7a95', '7522', '755b', '79ab', '7528', '7895', '82a4', '7b2b', '755e', '7975', '78ab', '754f', '7435', '77a5', '82d5', '7629', '7bd5', '7599', '7275', '7492', '772a', '7b4d', '7b4b', '8292', '74ca', '74cb', '7659', '7d25', '7499', '7269', '74dd', '7265', '75b6', '7d29', '7aa3', '76a7', '7555', '734d', '74c9', '7a51', '7566', '7567', '76ad', '76ae', '76af', '7692', '7ab2', '74b5', '7289', '7ad7', '74ab', '7d49', '72d1', '7aed', '7ba9', '7577', '76bd', '758a', '74a1', '75c9', '7ae9', '7a6a', '836a', '75ba', '8294', '728d', '7b65', '7adb', '82ba', '76b7', '76b1', '76cb', '7585', '7acd']
-    trusted_tracks = ['8255', '7c55', '796d', '75d5', '752b', '7454', '768a', '7ca5', '7615', '7a85', '7b49', '7cb5', '7a99', '7d55', '76d9', '7a96', '7a95', '7528', '7895', '7b2b', '7435', '77a5', '82d5', '7629', '7bd5', '7275', '7b4d', '8292', '74ca', '7659', '7499', '7265', '7d29', '734d', '7a51', '7566', '7567', '76af', '7ab2', '7ad7', '74ab', '7d49', '72d1', '7577', '74a1', '7ae9', '7a6a', '7b65', '7adb', '76b7', '76b1', '7acd']
-# screening: ndetects > 25, t_transit < 1 hour
+    # manualy selected tracks
+    #   trusted_tracks=['7265','72d1','74a1','74ab','7528','752b','7566','7567','7629','7659','768a','76b1','76b7','772a','7895','796d','79ab','7a85','7a96','7a99','7b49','7b4b','7b65','7ba9','7ca5','7d29','7dd5','8255','8292','7435']
+    # extracted from unique ids in segments_2m-model20190314.csv
+    trusted_tracks=['8255', '7dd5', '7b4b', '796d', '74ab', '8292', '72d1', '7659',
+                    '752b', '7ba9', '768a', '7265', '772a', '7a85', '7d29', '7435',
+                    '74a1', '7a99', '7b65', '7629', '7b49', '7566', '7567', '76b7',
+                    '76b1', '7a96', '7ca5', '79ab', '7528', '7895']
+    
+    # screening based on fraction detects 
+    #   trusted_tracks = ['8255', '7c55', '796d', '75d3', '75d5', '7af5', '752b', '7454', '768a', '7ca5', '7615', '7a85', '7d65', '76da', '7b49', '725b', '7cb5', '7a99', '7d55', '76d3', '7256', '769a', '76d9', '7a96', '7a95', '7522', '755b', '79ab', '7528', '7895', '82a4', '7b2b', '755e', '7975', '78ab', '754f', '7435', '77a5', '82d5', '7629', '7bd5', '7599', '7275', '7492', '772a', '7b4d', '7b4b', '8292', '74ca', '74cb', '7659', '7d25', '7499', '7269', '74dd', '7265', '75b6', '7d29', '7aa3', '76a7', '7555', '734d', '74c9', '7a51', '7566', '7567', '76ad', '76ae', '76af', '7692', '7ab2', '74b5', '7289', '7ad7', '74ab', '7d49', '72d1', '7aed', '7ba9', '7577', '76bd', '758a', '74a1', '75c9', '7ae9', '7a6a', '836a', '75ba', '8294', '728d', '7b65', '7adb', '82ba', '76b7', '76b1', '76cb', '7585', '7acd']
+    # trusted_tracks = ['8255', '7c55', '796d', '75d5', '752b', '7454', '768a', '7ca5', '7615', '7a85', '7b49',
+    #                   '7cb5', '7a99', '7d55', '76d9', '7a96', '7a95', '7528', '7895', '7b2b', '7435', '77a5',
+    #                   '82d5', '7629', '7bd5', '7275', '7b4d', '8292', '74ca', '7659', '7499', '7265', '7d29',
+    #                   '734d', '7a51', '7566', '7567', '76af', '7ab2', '7ad7', '74ab', '7d49', '72d1', '7577',
+    #                   '74a1', '7ae9', '7a6a', '7b65', '7adb', '76b7', '76b1', '7acd']
+
+    # RH - debugging track 7c55, which is supposed to be trusted, yet it has no segments.
+    # trusted_tracks=['7c55']
+    # screening: ndetects > 25, t_transit < 1 hour
+    
     sur = Survey(filename, grd_file, shp_file, trackIDs=trusted_tracks) # read survey
     sur.set_directories(default_fig_dir=fig_dir, csv_dir=csv_dir)
     sur.read_receiver_locations(fname='2018 surveyed_rcv_pos.csv')
@@ -1261,7 +1283,7 @@ if True: # __name__ == '__main__':
     outlier_params = [[sur.names,sur.polys],[-3.0],[2.0]]
     sur.identify_outliers(outlier_methods, outlier_params)
     sur.calc_smoothed(masked=True)
-    plot_cleaned = False
+    plot_cleaned = True
     if plot_cleaned:
         print( "plot cleaned")
         sur.plot_pos_single_track(variable='position', color_by='age',
@@ -1269,7 +1291,7 @@ if True: # __name__ == '__main__':
                                   plot_outliers=False, plot_masked_only=True,
                                   plot_changepts=False, show_metrics=False,
                                   fig_dir='plot_cleaned_trusted')
-    plot_smoothed = False
+    plot_smoothed = True
     if plot_smoothed:
         print( "plot smoothed")
         sur.plot_pos_single_track(variable='position', color_by='age',
@@ -1300,7 +1322,7 @@ if True: # __name__ == '__main__':
                                   tracks=trusted_tracks,
                                   fig_dir='plot_changepts_fill_trusted')
     sur.speed_over_ground(masked=True)
-    plot_speed = False
+    plot_speed = True
     if plot_speed:
         print( "plot speed over ground")
         sur.plot_speed_single_track(variable='speed_over_ground', 
@@ -1312,7 +1334,7 @@ if True: # __name__ == '__main__':
                                     masked=True,
                                     tracks=trusted_tracks)
     sur.swimming_speed(hydro_fname, tracks=trusted_tracks)
-    plot_swim = False
+    plot_swim = True
     if plot_swim:
         print( "plot swimming speed")
         sur.plot_speed_single_track(variable='swimming_speed', 
