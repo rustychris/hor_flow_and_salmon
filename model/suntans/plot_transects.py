@@ -143,7 +143,7 @@ for ti,t in enumerate(tran_geoms):
         fig.axes[0].axis( xmin=fig.axes[3].axis()[0],
                           xmax=fig.axes[3].axis()[1] )
 
-    if 1: # For reporting, omit this stuff, and shift legends
+    if 0: # For reporting, omit this stuff, and shift legends
         fig.texts=[]
         ax_avg=fig.axes[0]
         ax_avg.legend(bbox_to_anchor=[0,-0.12], loc='upper left')
