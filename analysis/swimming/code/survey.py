@@ -381,7 +381,7 @@ class Survey(object):
                     ax2 = fig.add_subplot(gs[-1,:2])
                     ax3 = fig.add_subplot(gs[-1,2:])
                     #tr.plot_swim_vel_histograms(ax2, ax3, masked=masked)
-                    tr.plot_swim_vel_scatter(ax2, ax3, masked=masked)
+                    tr.plot_swim_vel_scatter(ax2, ax3, masked=masked, transpose_coords=True)
                     plt.subplots_adjust(wspace=3)
                 else:
                     if masked:
@@ -1086,7 +1086,7 @@ class Survey(object):
     def add_vel_scale(self, ax, tr):
         """ show velocity scale on map figure """
         qxy = [0.20, 0.25]
-        key_scale = 2.0 # 0.05
+        key_scale = 0.5 # 0.05
         qk_label = '%3.1f m s$^{-1}$'%key_scale
         self.qk = ax.quiverkey(tr.quiv, qxy[0], qxy[1], key_scale, qk_label)
 
@@ -1263,7 +1263,8 @@ if True: # __name__ == '__main__':
                     '752b', '7ba9', '768a', '7265', '772a', '7a85', '7d29', '7435',
                     '74a1', '7a99', '7b65', '7629', '7b49', '7566', '7567', '76b7',
                     '76b1', '7a96', '7ca5', '79ab', '7528', '7895']
-    
+    # Just the ones used in Mike's ppt:
+    trusted_tracks=['7567','772a', '8255', '7b65',  '8292', '7a96']
     # screening based on fraction detects 
     #   trusted_tracks = ['8255', '7c55', '796d', '75d3', '75d5', '7af5', '752b', '7454', '768a', '7ca5', '7615', '7a85', '7d65', '76da', '7b49', '725b', '7cb5', '7a99', '7d55', '76d3', '7256', '769a', '76d9', '7a96', '7a95', '7522', '755b', '79ab', '7528', '7895', '82a4', '7b2b', '755e', '7975', '78ab', '754f', '7435', '77a5', '82d5', '7629', '7bd5', '7599', '7275', '7492', '772a', '7b4d', '7b4b', '8292', '74ca', '74cb', '7659', '7d25', '7499', '7269', '74dd', '7265', '75b6', '7d29', '7aa3', '76a7', '7555', '734d', '74c9', '7a51', '7566', '7567', '76ad', '76ae', '76af', '7692', '7ab2', '74b5', '7289', '7ad7', '74ab', '7d49', '72d1', '7aed', '7ba9', '7577', '76bd', '758a', '74a1', '75c9', '7ae9', '7a6a', '836a', '75ba', '8294', '728d', '7b65', '7adb', '82ba', '76b7', '76b1', '76cb', '7585', '7acd']
     # trusted_tracks = ['8255', '7c55', '796d', '75d5', '752b', '7454', '768a', '7ca5', '7615', '7a85', '7b49',

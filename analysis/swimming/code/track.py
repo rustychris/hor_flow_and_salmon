@@ -1283,9 +1283,18 @@ class Track(object):
 
         return 
 
-    def plot_swim_vel_scatter(self, ax1, ax2, masked=False, 
+    def plot_swim_vel_scatter(self, ax1, ax2, masked=False, transpose_coords=False,
+                              age_scale='log10',
                               add_cbar=True, **kwargs):
-        """ plot scatter of swim velocity in coordinates relative to hydro """
+        """
+        plot scatter of swim velocity in coordinates relative to hydro 
+        ax1: axes handle for swim velocity
+        ax2: axes handle for velocity over ground
+        age_scale: 'log10' log scale, 'linear' linear scale.
+        masked: ?
+        transpose_coords: if true, y-axis is downstream/upstream, and x-axis is left/right
+        
+        """
         rec_swim = self.rec_swim
         nsegments = len(rec_swim)
 
@@ -1296,20 +1305,36 @@ class Track(object):
         #swim_spd = self.rec_swim['swim_spd']
 
         if nsegments==0:
+            # happens when a the model output hasn't been extracted for this tag.
             print("Tag %s has no segments. Skipping plot_swim_vel_scatter"%self.ID)
             return
         time_from_entry = rec_swim.tm - rec_swim.tm[0] + 1
-        log_age = np.log10(time_from_entry)
-        scat = ax1.scatter(u_rel, v_rel, marker='o', s=2.0, c=log_age)
-        ax1.set_xlabel('swim u (m s$^{-1}$)')
-        ax1.set_ylabel('swim v (m s$^{-1}$)')
+        if age_scale=='log10':
+            age_scaled = np.log10(time_from_entry)
+        elif age_scale=='linear':
+            age_scaled = time_from_entry
+        else:
+            raise Exception("Bad age_scale: %s"%age_scale)
+
+        u,v=u_rel,v_rel
+        x_label="Up $\leftrightarrow$ Down"
+        y_label="Left $\leftrightarrow$ Right"
+        if transpose_coords:
+            u,v=-v,u # this gives left=left
+            x_label,y_label=y_label,x_label
+            
+        scat = ax1.scatter(u, v, marker='o', s=2.0, c=age_scaled)
+
+        ax1.set_xlabel(x_label)
+        ax1.set_ylabel(y_label)
+        
         fsize = 6
-        ax1.text(1.01, 0.90, "n = %d"%nsegments, transform=ax1.transAxes,
+        ax1.text(1.01, 0.90,
+                 "\n".join( [ "n = %d"%nsegments, 
+                              "avg|u| = %4.2f"%np.average(np.abs(u_rel)),
+                              "avg|v| = %4.2f"%np.average(np.abs(v_rel)) ]),
+                 va='top',transform=ax1.transAxes,
                  fontsize=fsize)
-        ax1.text(1.01, 0.80, "avg|u| = %4.2f"%np.average(np.abs(u_rel)),
-                 transform=ax1.transAxes, fontsize=fsize)
-        ax1.text(1.01, 0.70, "avg|v| = %4.2f"%np.average(np.abs(v_rel)),
-                 transform=ax1.transAxes, fontsize=fsize)
         ax1.set_xlim([-0.5,0.5])
         ax1.set_ylim([-0.5,0.5])
         ax1.axhline(0, color='k',zorder=0)
@@ -1329,15 +1354,21 @@ class Track(object):
         us = rec_swim.us
         vs = rec_swim.vs
         uh,vh = self.vel_from_hydro(vel=[us,vs], rec_swim=rec_swim)
-        scat2 = ax2.scatter(uh, vh, marker='o', s=2.0, c=log_age)
-        ax2.set_xlabel('u (m s$^{-1}$)')
-        ax2.set_ylabel('v (m s$^{-1}$)')
-        ax2.text(1.01, 0.90, "n = %d"%nsegments, transform=ax2.transAxes,
+        u,v=uh,vh
+        
+        if transpose_coords:
+            u,v=-v,u
+            
+        scat2 = ax2.scatter(u, v, marker='o', s=2.0, c=age_scaled)
+        ax2.set_xlabel(x_label) 
+        ax2.set_ylabel(y_label)
+        ax2.text(1.01, 0.90,
+                 "\n".join( ["n = %d"%nsegments,
+                             "avg|u| = %4.2f"%np.average(np.abs(uh)),
+                             "avg|v| = %4.2f"%np.average(np.abs(vh))]),
+                 transform=ax2.transAxes,
+                 va='top',
                  fontsize=fsize)
-        ax2.text(1.01, 0.80, "avg|u| = %4.2f"%np.average(np.abs(uh)),
-                 transform=ax2.transAxes, fontsize=fsize)
-        ax2.text(1.01, 0.70, "avg|v| = %4.2f"%np.average(np.abs(vh)),
-                 transform=ax2.transAxes, fontsize=fsize)
         ax2.axhline(0, color='k',zorder=0)
         ax2.axvline(0, color='k',zorder=0)
         ax2.set_xlim([-1,1])

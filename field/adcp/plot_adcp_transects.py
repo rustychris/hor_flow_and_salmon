@@ -7,8 +7,12 @@ import glob
 import six
 import numpy as np
 import xarray as xr
+from shapely import geometry
 
+from stompy.spatial import wkb2shp
 from stompy import xr_transect
+from stompy import memoize
+import matplotlib.pyplot as plt
 
 ##
 six.moves.reload_module(xr_transect)
@@ -26,34 +30,71 @@ def tweak_sontek(ds):
     return ds
 
 # Data from each set of repeats is in a single folder
-transect_dirs=glob.glob("040518_BT/*BTref")
+# 2018 data:
+# transect_dirs=glob.glob("040518_BT/*BTref")
+# 2019 data:
+transect_dirs=["DAV_Transects_2019/Processed DAV 2019/JCT",
+               "DAV_Transects_2019/Processed DAV 2019/OR1",
+               "DAV_Transects_2019/Processed DAV 2019/SJD1",
+               "DAV_Transects_2019/Processed DAV 2019/SJD2",
+               "DAV_Transects_2019/Processed DAV 2019/SJD3",
+               "DAV_Transects_2019/Processed DAV 2019/SJU01",
+               "DAV_Transects_2019/Processed DAV 2019/SJU02",
+               "DAV_Transects_2019/Processed DAV 2019/SJU03",
+               "DAV_Transects_2019/Processed DAV 2019/SJU04",
+               "DAV_Transects_2019/Processed DAV 2019/SJU05",
+               "DAV_Transects_2019/Processed DAV 2019/SJU06",
+               "DAV_Transects_2019/Processed DAV 2019/SJU07",
+               ]
+
+force=True
+write_nc=False
+write_shp=True
+shp_fn="../../gis/transects_2019.shp"
+
+geoms=[]
 
 for transect_dir in transect_dirs:
     avg_fn=transect_dir+'-avg.nc'
-    if os.path.exists(avg_fn):
-        continue
     rivr_fns=glob.glob('%s/*.rivr'%transect_dir) + glob.glob('%s/*.riv'%transect_dir)
+    assert len(rivr_fns)
 
-    tran_dss=[ tweak_sontek(read_sontek.surveyor_to_xr(fn,proj='EPSG:26910'))
-               for fn in rivr_fns ]
+    @memoize.memoize()
+    def tran_dss():
+        return [ tweak_sontek(read_sontek.surveyor_to_xr(fn,proj='EPSG:26910'))
+                 for fn in rivr_fns ]
 
-    ds=xr_transect.average_transects(tran_dss)
+    if write_nc and (not os.path.exists(avg_fn)):
+        ds=xr_transect.average_transects(tran_dss())
 
-    ds['U']=('sample','layer','xy'), np.concatenate( (ds.Ve.values[:,:,None],
-                                                      ds.Vn.values[:,:,None]), axis=2)
+        ds['U']=('sample','layer','xy'), np.concatenate( (ds.Ve.values[:,:,None],
+                                                          ds.Vn.values[:,:,None]), axis=2)
 
-    if xr_transect.Qleft(ds)<0:
-        ds=ds.isel(sample=slice(None,None,-1))
-        ds.d_sample[:]=ds.d_sample[0]-ds.d_sample
+        if xr_transect.Qleft(ds)<0:
+            ds=ds.isel(sample=slice(None,None,-1))
+            ds.d_sample[:]=ds.d_sample[0]-ds.d_sample
 
-    if 0: # Extend the transects in the vertical, too.
-        var_methods=[ ('U',dict(xy=0),'linear','constant'),
-                      ('U',dict(xy=1),'linear','constant') ]
-        ds=xr_transect.extrapolate_vertical(tran,var_methods,eta=0)
-        
-    ds.attrs['source']=transect_dir
+        if 0: # Extend the transects in the vertical, too.
+            var_methods=[ ('U',dict(xy=0),'linear','constant'),
+                          ('U',dict(xy=1),'linear','constant') ]
+            ds=xr_transect.extrapolate_vertical(tran,var_methods,eta=0)
 
-    ds.to_netcdf(avg_fn)
+        ds.attrs['source']=transect_dir
+
+        ds.to_netcdf(avg_fn)
+    else:
+        print("Skipping writing netcdf")
+
+    if write_shp:
+        for ds in tran_dss():
+            geoms.append( geometry.LineString( np.c_[ ds.x_sample.values,
+                                                      ds.y_sample.values ] ) )
+
+
+##
+if write_shp:
+    wkb2shp.wkb2shp(shp_fn,geoms)
+    
 
 ##
 six.moves.reload_module(summarize_xr_transects)

@@ -45,6 +45,27 @@ def set_bounds(ax,ds,fac=0.1):
     ax.set_adjustable('box')
     ax.set_aspect(1)
     zoom=tran_zoom(ds,fac=fac)
+
+    # try to keep the aspect ratio the same
+    xxyy=ax.axis()
+    # dx/dy
+    ax_aspect=(xxyy[1]-xxyy[0])/(xxyy[3]-xxyy[2])
+
+    # dx/dy
+    dx=(zoom[1]-zoom[0])
+    dy=(zoom[3]-zoom[2])
+    zoom_aspect=dx/dy
+    if zoom_aspect> ax_aspect:
+        # expand y
+        mid_y=0.5*(zoom[2]+zoom[3])
+        zoom[2]=mid_y-0.5*dx/ax_aspect
+        zoom[3]=mid_y+0.5*dx/ax_aspect
+    else:
+        # expand x
+        mid_x=0.5*(zoom[0]+zoom[1])
+        zoom[0]=mid_x-0.5*dy*ax_aspect
+        zoom[1]=mid_x+0.5*dy*ax_aspect
+
     ax.axis(zoom)
 
 ##
@@ -178,7 +199,7 @@ def summarize_transect(tran,num=None,w_scale=1.0,quiver_count=75,
         else:
             def smooth(x): return x
 
-        ax_avg.plot( tran.d_sample, smooth(u_avg.values), label='Model streamwise')
+        ax_avg.plot( tran.d_sample, smooth(u_avg.values), label='Streamwise')
         if 'mean_water_speed' in tran: # see if we get something similar to them
             ax_avg.plot( tran.d_sample, smooth(tran.mean_water_speed), label='Mean water speed')
         if 1: # secondary strength
@@ -187,7 +208,7 @@ def summarize_transect(tran,num=None,w_scale=1.0,quiver_count=75,
 
             if 'secondary' not in tran:
                 xr_transect.calc_secondary_strength(tran,name='secondary')
-            style=dict(lw=0.5, color='g',label='Model secondary')
+            style=dict(lw=0.5, color='g',label='Secondary')
             #ax_sec.plot(tran.d_sample, smooth(tran.secondary), **style)
             ax_sec.fill_between(tran.d_sample, 0, smooth(tran.secondary),
                                 alpha=0.3, **style)
