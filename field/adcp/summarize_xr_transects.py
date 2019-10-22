@@ -173,6 +173,8 @@ def summarize_transect(tran,num=None,w_scale=1.0,quiver_count=75,
             ax1.axis(slice_axis)
             ax1.text(0.05,0.05,"Streamwise",transform=ax1.transAxes)
             ax2.text(0.05,0.05,"Lateral",transform=ax2.transAxes)
+            ax1.set_facecolor('0.85')
+            ax2.set_facecolor('0.85')
 
     for ax in [ax1,ax2]:
         if 'z_bed' in tran:

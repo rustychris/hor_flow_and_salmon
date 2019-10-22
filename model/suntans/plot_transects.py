@@ -26,13 +26,22 @@ six.moves.reload_module(summarize_xr_transects)
 # plot a few a sections
 # Run from the run directory
 # run_dir="."
-run_dir="runs/snubby_067"
+import argparse
+
+parser=argparse.ArgumentParser(description='Plot model-data comparison figures for a run.')
+
+parser.add_argument("-d",'--run-dir',help="Run directory of model")
+args=parser.parse_args()
+
+run_dir=args.run_dir
+
 model=sun_driver.SuntansModel.load(run_dir)
+model.manual_z_offset=-4 # should be in sync with hor_snubby_oper.py
 
 tran_shp=os.path.join(base,"../../gis/model_transects.shp")
 tran_geoms=wkb2shp.shp2geom(tran_shp)
 
-fig_dir=os.path.join(model.run_dir,'figs-20181030')
+fig_dir=os.path.join(model.run_dir,'figs-20190812')
 os.path.exists(fig_dir) or os.makedirs(fig_dir)
 
 for ti,t in enumerate(tran_geoms):
@@ -63,6 +72,7 @@ for ti,t in enumerate(tran_geoms):
         print("Pulling transect geometry from line fit to observations")
         xy=np.c_[ obs.orig_x_sample.values, obs.orig_y_sample.values ]
         xy=xy[np.isfinite(xy[:,0]),:]
+        xy=utils.remove_repeated(xy,axis=0)
     else:
         print("Pulling transect geometry from shapefile")
         xy=np.array(t['geom'])
@@ -71,6 +81,11 @@ for ti,t in enumerate(tran_geoms):
     if tran is None:
         print("No overlap for %s, moving on"%t['name'])
         continue
+
+    # shift by -manual_z_offset
+    for fld in ['eta','z_r','z_w','z_ctr','z_int']:
+        if fld in tran:
+            tran[fld].values -= model.manual_z_offset
 
     if tran.attrs['source']=='.':
         tran.attrs['source']=os.path.basename(os.getcwd())
@@ -87,6 +102,7 @@ for ti,t in enumerate(tran_geoms):
     smooth_samples=8
     fig=summarize_xr_transects.summarize_transect(tran,num=20+ti,w_scale=0.0,plot_averages=True,
                                                   smooth_samples=smooth_samples)
+    ax_avg=fig.axes[0]
     
     if obs is not None:
         mod_seg=np.c_[ tran.x_sample.values, tran.y_sample.values ]
@@ -143,6 +159,8 @@ for ti,t in enumerate(tran_geoms):
         fig.axes[0].axis( xmin=fig.axes[3].axis()[0],
                           xmax=fig.axes[3].axis()[1] )
 
+    fig.savefig(os.path.join(fig_dir,"transect-metrics-%s.png"%t['name']))
+
     if 0: # For reporting, omit this stuff, and shift legends
         fig.texts=[]
         ax_avg=fig.axes[0]
@@ -150,4 +168,4 @@ for ti,t in enumerate(tran_geoms):
         ax_sec=fig.axes[7]
         ax_sec.legend(bbox_to_anchor=[1,-0.12], loc='upper right')
         fig.canvas.draw()
-    fig.savefig(os.path.join(fig_dir,"transect-%s.png"%t['name']))
+        fig.savefig(os.path.join(fig_dir,"transect-nometrics-%s.png"%t['name']))

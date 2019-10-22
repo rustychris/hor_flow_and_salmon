@@ -7,10 +7,8 @@ from stompy import utils
 import pandas as pd
 import numpy as np
 ##
-#g=ugrid.UnstructuredGrid.from_ugrid('snubby-with_bathy.nc')
 
 def add_roughness(g):
-
     # make a copy of the grid reprojected grid to 1ft dem
     g_ft=g.copy()
     to_ca=proj_utils.mapper('EPSG:26910','EPSG:2227')
