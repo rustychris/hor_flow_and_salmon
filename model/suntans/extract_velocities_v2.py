@@ -32,7 +32,8 @@ seg_dnum_to_utc=7./24 # add this to segment dnums to get utc.
 segments=pd.read_csv(inp_fn)
 
 # choose the last run of a sequence:
-mod=sun_driver.SuntansModel.load('runs/snubby_cfg003_20180411')
+#mod=sun_driver.SuntansModel.load('runs/snubby_cfg003_20180411')
+mod=sun_driver.SuntansModel.load('runs/cfg006_20180310_20180310')
 
 seq=mod.chain_restarts()
 run_starts=np.array([mod.run_start for mod in seq])
@@ -298,7 +299,7 @@ if 1: # scatter with vorticity
     
 ##
 
-out_fn=inp_fn.replace(".csv","-model20190710.csv")
+out_fn=inp_fn.replace(".csv","-model20191022.csv")
 assert out_fn!=inp_fn
 
 joined.to_csv(out_fn,index=False)
