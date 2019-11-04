@@ -7,6 +7,8 @@ code
 import pandas as pd
 import numpy as np
 import datetime
+from stompy import filters
+
 import matplotlib.pyplot as plt
 from scipy.optimize import fmin
 
@@ -54,7 +56,9 @@ def parse_tek(det_fn,cf2_fn=None):
     df2.loc[ df.temp>35, 'temp'] =np.nan
 
     # clean up pressure
-    df2.loc[ df2.pressure>160e3, 'pressure']=np.nan
+    # this had been limited to 160e3, but
+    # AM9 has a bad calibration (or maybe it's just really deep)
+    df2.loc[ df2.pressure>225e3, 'pressure']=np.nan
     df2.loc[ df2.pressure<110e3, 'pressure']=np.nan
 
     # trim to first/last valid pressure
@@ -161,8 +165,8 @@ class BeaconPair(object):
         valid_start=np.max( [self.A_full.time.values[0],  self.B_full.time.values[0]] )
         valid_end = np.min( [self.A_full.time.values[-1], self.B_full.time.values[-1]] )
 
-        self.A=self.A_full.isel( index=(A_full.time>=valid_start)&(A_full.time<=valid_end) ).copy()
-        self.B=self.B_full.isel( index=(B_full.time>=valid_start)&(B_full.time<=valid_end) ).copy()
+        self.A=self.A_full.isel( index=(self.A_full.time>=valid_start)&(self.A_full.time<=valid_end) ).copy()
+        self.B=self.B_full.isel( index=(self.B_full.time>=valid_start)&(self.B_full.time<=valid_end) ).copy()
     def figure_environmental(self):
         for figi,df in enumerate([self.A,self.B]):
             # Glance at some fields to see if they make sense
@@ -270,7 +274,11 @@ class BeaconPair(object):
         axs[0].plot(self.transits.time,self.transits.mean_travel_us * 1e-3, 
                     'k.',alpha=0.2,ms=1,label='Mean travel time')
         axs[0].set_ylabel('(ms)')
-        axs[0].axis(ymin=74,ymax=79)
+        # axs[0].axis(ymin=74,ymax=79)
+        lims=np.percentile(1e-3*self.transits.mean_travel_us.values,[25,75])
+        width=lims[1]-lims[0]
+        axs[0].axis(ymin=lims[0]-width,ymax=lims[1]+width)
+        
         axs[0].legend(loc='upper right')
 
         axs[1].plot( self.transits.time,self.transits.clock_skew_us * 1e-6,
@@ -279,292 +287,126 @@ class BeaconPair(object):
         axs[1].legend(loc='upper right')
 
         
-
-pair=BeaconPair("2019 Data/HOR_Flow_TekDL_2019/AM1_186002/am18-6002190531229.DET",
-                "2019 Data/HOR_Flow_TekDL_2019/SM3_187026/20190516/187026_190301_124447_P/sm18-7026190421300.DET")
-
-
-## 
-am1_full=parse_tek("2019 Data/HOR_Flow_TekDL_2019/AM1_186002/am18-6002190531229.DET")
-sm3_full=parse_tek("2019 Data/HOR_Flow_TekDL_2019/SM3_187026/20190516/187026_190301_124447_P/sm18-7026190421300.DET")
-
+#pair=BeaconPair("2019 Data/HOR_Flow_TekDL_2019/AM1_186002/am18-6002190531229.DET",
+#                "2019 Data/HOR_Flow_TekDL_2019/SM3_187026/20190516/187026_190301_124447_P/sm18-7026190421300.DET")
 
 ##
 
-A_full=am1_full
-B_full=sm3_full
+AM1="2019 Data/HOR_Flow_TekDL_2019/AM1_186002/am18-6002190531229.DET"
+AM3="2019 Data/HOR_Flow_TekDL_2019/AM3_186003/20190517/186003_190217_125944_P/186003_190217_125944_P.DET"
+SM3="2019 Data/HOR_Flow_TekDL_2019/SM3_187026/20190516/187026_190301_124447_P/sm18-7026190421300.DET"
+SM8="2019 Data/HOR_Flow_TekDL_2019/SM8_187028/20190516/187028_190216_175239_P/sm18-7028190421324.DET"
+AM4="2019 Data/HOR_Flow_TekDL_2019/AM4_186008/20190517/186008_190517_130946_P/186008_190517_130946_P.DET"
 
-# trim to common valid time period
-valid_start=np.max( [A_full.time.values[0],  B_full.time.values[0]] )
-valid_end = np.min( [A_full.time.values[-1], B_full.time.values[-1]] )
+AM7="2019 Data/HOR_Flow_TekDL_2019/AM7_186007/20190517/186007_190217_135133_P/am18-6007190481351.DET"
+AM9="2019 Data/HOR_Flow_TekDL_2019/AM9_186004/20190517/186004_190311_144244_P/am18-6004190440924.DET"
+SM7="2019 Data/HOR_Flow_TekDL_2019/SM7_187017/20190516/187017_190225_154939_P/sm18-7017190391457.DET"
 
-A=A_full.isel( index=(A_full.time>=valid_start)&(A_full.time<=valid_end) ).copy()
-B=B_full.isel( index=(B_full.time>=valid_start)&(B_full.time<=valid_end) ).copy()
+##
+# original test pair
+AM1_SM3=BeaconPair(AM1,SM3)
 
-## 
-for figi,df in enumerate([A,B]):
-    # Glance at some fields to see if they make sense
-    plt.figure(1+figi).clf()
-    fig,(axT,axP)=plt.subplots(2,1,sharex=True,num=1+figi)
+##
+# good..
+AM3_SM8=BeaconPair(AM3,SM8)
+##
 
-    axT.plot(df.time,df.temp,label='temp')
-    axT.legend(loc='upper right')
-    axP.plot(df.time,df.pressure,label='pressure')
-    axP.legend(loc='upper right')
+# okay - lots of multipath, it seems
+SM8_AM4=BeaconPair(SM8,AM4)
 
-## 
-# When did A here B?
+##
 
-def remove_multipath(ds):
-    # Sometimes a single ping is heard twice (a local bounce)
-    # when the same tag is heard in quick succession (<1s) drop the
-    # second occurrence.
-    delta_us=np.diff(ds.time.values) / np.timedelta64(1,'us')
-    assert np.all(delta_us>0)
-    bounces=delta_us<1e6
-    valid=np.r_[ True, delta_us>1e6 ]
-    return ds.isel(index=valid).copy()
+AM4_AM3=BeaconPair(AM4,AM3)
 
-def x_to_y(x,y):
-    """
-    x,y: datasets of tag detections.
-    returns the subset of detections in y that are coming from
-    x, and not obviously multipaths
-    """
-    transits=y.isel( index=(y.tag==x.beacon_id) )
-    good_transits=remove_multipath(transits)
-    return good_transits
+##
 
-A_to_A=x_to_y(A,A)
-A_to_B=x_to_y(A,B)
-B_to_B=x_to_y(B,B)
-B_to_A=x_to_y(B,A)
+# some issues with one or more of these beacons.
+# just much deeper.
+# but it looks like maybe it wiggled a lot.
+# the travel time has crazy noise, like +-0.3ms
+# which is 40cm or so.
+AM7_AM9=BeaconPair(AM7,AM9)
+# and these never converge on a good clock drift.
+# maybe outside the checked range.
+AM9_SM7=BeaconPair(AM9,SM7)
+SM7_AM7=BeaconPair(SM7,AM7)
 
-# Make sure everything is chronological
-for ds in [A_to_A,A_to_B,B_to_B,B_to_A]:
-    assert np.diff(ds.time.values).min()>np.timedelta64(0)
+##
 
-## 
 
-# prescribe these so they're not changing with each pair
-t0=np.datetime64('2019-03-01T00:00')
-tN=np.datetime64('2019-05-08T00:00')
+# What does the combination of all 3 tell us?
+# these legs form a CW triangle, and AM4-AM3
+# are closer to shore river-right. there should be
+# a net CW circulation.  
+legs=[AM3_SM8,
+      SM8_AM4,
+      AM4_AM3]
 
-#t0=utils.to_dt64(max( A_to_B.time.values.min(), B_to_A.time.values.min() ))
-#tN=utils.to_dt64(min( A_to_B.time.values.max(), B_to_A.time.values.max() ))
-t0N=[t0,tN]
+##
 
-## 
+AM1_SM8=BeaconPair(AM1,SM8)
+SM8_AM3=BeaconPair(SM8,AM3)
+AM3_AM1=BeaconPair(AM3,AM1)
+
+legs=[AM1_SM8,
+      SM8_AM3,
+      AM3_AM1]
+##
+
+t_complete=np.unique( np.concatenate( [ leg.transits.time.values for leg in legs] ) )
+
+skews=[ np.interp( utils.to_dnum(t_complete),
+                   utils.to_dnum(leg.transits.time.values), leg.transits.clock_skew_us.values,
+                   left=np.nan,right=np.nan)
+        for leg in legs]
+
+##
 
 from stompy.io.local import cdec
-msd_flow=cdec.cdec_dataset('MSD',start_date=t0N[0],end_date=t0N[1],sensor=20,
+msd_flow=cdec.cdec_dataset('MSD',start_date=BeaconPair.t0,end_date=BeaconPair.tN,sensor=20,
                            cache_dir='.')
-msd_stage=cdec.cdec_dataset('MSD',start_date=t0N[0],end_date=t0N[1],sensor=1,
+msd_stage=cdec.cdec_dataset('MSD',start_date=BeaconPair.t0,end_date=BeaconPair.tN,sensor=1,
                            cache_dir='.')
+
 ##
 
-# Look at the time series of trav_secs for each
-#  Adding +-30secs to shift makes the time series "hairy"
-#  which is probably that error I've been looking for where
-#  the interval from the tags is not constant.  so this
-#  should be getting the correct line up of pings.
-#  it seems like A doesn't always do a good job of hearing itself?
-#
+plt.figure(20).clf()
+fig,axs=plt.subplots(3,1,sharex=True,num=20)
 
-# Since ultimately we want to compute lags between multiple pairs,
-# better to use the shift and drift only to match pings, but
-# compute the lags with the real clocks.
-# I think..
+#for i,(leg,skew) in enumerate( zip(legs,skews) ):
+#    axs[0].plot(t_complete,skew)
 
-# HERE HERE will have to figure out how to deal with this
-# less manually
-if 0: # the manually tuned "good" numbers:
-    shift=-1.5e6 
-    drift_us_per_day=-315000 # bingo.
-else:
-    # trying to understand how to do this automatically
-    # as shift is off, then fewer pings make the cut.
-    # but it's not super sensitive
-    shift=-0.7e6 
-    drift_us_per_day=-109000 # bingo.
+net_skew=skews[0]+skews[1]+skews[2]
+axs[0].plot(t_complete,net_skew,label='Net skew~circulation')
 
-def cost(params):
-    shift,drift=params
-    add_src_time(A_to_B,A_to_A,shift_us=shift,drift_us_per_day=drift,t0=t0)
-    add_src_time(B_to_A,B_to_B,shift_us=-shift,drift_us_per_day=-drift,t0=t0)
-    
-    # Try to develop a metric for tuning the shifts.
-    scoreAB=np.sqrt( np.mean((A_to_B.trav_secs.values)**2) )
-    scoreBA=np.sqrt( np.mean((B_to_A.trav_secs.values)**2) )
-    return scoreAB + scoreBA
+# Any chance that filtering out the spikes gives something reasonable?
+# what sign would I expect here?
 
-from scipy.optimize import fmin
+lp_skew=net_skew.copy()
+lp_skew[np.abs(lp_skew)>6000]=np.nan
 
-# If I start it near the optimum it's fine, but
-# there are significant local minima problems.
+lp_skew=filters.lowpass_fir(lp_skew,winsize=5000)
+axs[0].plot(t_complete,lp_skew,label='LP Net skew')
 
-# grid search to start with:
-shifts=np.linspace(-5e6,5e6,21)
-drifts=np.linspace(-1e6,1e6,21)
 
-best_c=np.inf
-best_shift=None
-best_drift=None
-for shift in shifts:
-    for drift in drifts:
-        c=cost([shift,drift])
-        if c<best_c:
-            best_shift=shift
-            best_drift=drift
-            best_c=c
-            print(c)
+hnd_flow=axs[1].plot(msd_flow.time,msd_flow.sensor0020,label='Flow')
 
-# Refine that
-best=fmin(cost,[best_shift,best_drift])
-cost(best)
+ax_stage=plt.twinx(axs[1])
+hnd_stage=ax_stage.plot(msd_stage.time,msd_stage.sensor0001,'g-',label='Stage')
+
+ds=AM3_SM8.B_full
+axs[2].plot( ds.time,ds.temp,label='Temperature (AM3)')
+
+axs[0].legend(loc='upper right')
+axs[1].legend(handles=hnd_flow+hnd_stage,
+              loc='upper right')
+axs[2].legend(loc='upper right')
+
+axs[0].axis(ymin=-5000,ymax=5000)
+
+fig.tight_layout()
 
 ## 
-a2b_good=A_to_B.isel(index=np.abs(A_to_B.trav_secs.values)<5)
-b2a_good=B_to_A.isel(index=np.abs(B_to_A.trav_secs.values)<5)
-
-plt.figure(13).clf()
-plt.plot(A_to_B.time,A_to_B.trav_secs,alpha=0.1,label='A to B all')
-plt.plot(a2b_good.time,a2b_good.trav_secs,label='A to B good')
-plt.plot(B_to_A.time,B_to_A.trav_secs,alpha=0.1,label='B to A all ')
-plt.plot(b2a_good.time,b2a_good.trav_secs,label='B to A good')
-plt.legend()
-plt.axis(ymin=-20,ymax=20)
+fig.savefig('triangle-skew-analysis.png',dpi=150)
 
 ##
-
-# The old code is below, where I try to match pairs of a->b and b->a
-# pings.
-# instead, could treat each as a timeseries.
-# general idea being that we want to interpolate over the
-# interval between individual pings, such that a linear drift
-# can be exactly accounted for.
-
-# the two quantities I want are mean_travel and clock_skew.
-# mean_travel = 0.5 * ( a2b_time_b - a2b_time_a  + b2a_time_a - b2a_time_b)
-# clock_skew= 0.5*(a2b_time_b+b2a_time_b) - 0.5*(a2b_time_a + b2a_time_a)
-
-##
-
-# rewrite to group terms by ping
-#mean_travel = 0.5*(a2b_time_b - a2b_time_a) + 0.5*(b2a_time_a - b2a_time_b)
-#clock_skew  = 0.5*(a2b_time_b - a2b_time_a) - 0.5*(b2a_time_a - b2a_time_b)
-
-all_times=np.unique( np.concatenate( [a2b_good.time.values,
-                                      b2a_good.time.values] ))
-
-a2b_transit_us=np.interp( utils.to_dnum(all_times),
-                          utils.to_dnum(a2b_good.time.values),
-                          (a2b_good.time.values - a2b_good.time_src.values)/np.timedelta64(1,'us'))
-
-b2a_transit_us=np.interp( utils.to_dnum(all_times),
-                          utils.to_dnum(b2a_good.time.values),
-                          (b2a_good.time.values - b2a_good.time_src.values)/np.timedelta64(1,'us'))
-
-mean_travel_us=(a2b_transit_us+b2a_transit_us)/2
-clock_skew_us=(a2b_transit_us-b2a_transit_us)/2
-
-##
-
-a2b_times=a2b_good.time.values
-b2a_times=b2a_good.time.values
-
-# Not bad - so the pings in a2s_good and s2a_good do appear to be almost
-# entirely good matches
-# the drift, aside from clock updates, is down ~0.1s/month
-# so if two pings are within 100 seconds of each other, how much drift occured?
-#  4us.  So at this point we're no better than 4us.
-
-# again, here we want to match pings based on the
-# shifted time, but [maybe] record the differences
-# using the real instrument time.
-a_matches=[]
-
-a2b_times=a2b_good.time.values
-b2a_times=b2a_good.time.values
-if 0:
-    #old code, when time_src included the shift
-    a2b_time_srcs=a2b_good.time_src.values
-    b2a_time_srcs=b2a_good.time_src.values
-else:
-    # new code, diagnosing effect of time_src vs time_src_shifted
-    # using time_src_shifted gives much tighter results in fig 14.
-    # I think that's because the match difference doesn't
-    # contaminate the lags as much when the times are already
-    # shifted.
-    
-    # this choice does not affect the choice of ping pairs,
-    # as that choice is made solely on destination times.
-    a2b_time_srcs=a2b_good.time_src_shifted.values
-    b2a_time_srcs=b2a_good.time_src_shifted.values
-
-for a2b_idx in range(len(a2b_good.index)):
-    match={}
-    match['a2b_idx']=a2b_idx
-    match['a2b_time_b']=a2b_times[a2b_idx]
-    match['a2b_time_a']=a2b_time_srcs[a2b_idx]
-
-    # Find a good b2a ping:
-    b2a_idx=utils.nearest(b2a_times,match['a2b_time_b'])
-    match['b2a_idx']=b2a_idx
-    match['b2a_time_b']=b2a_time_srcs[b2a_idx]
-    match['b2a_time_a']=b2a_times[b2a_idx]
-    match['match_diff']=match['a2b_time_b'] - match['b2a_time_a']
-    a_matches.append(match)
-
-## 
-a_df=pd.DataFrame(a_matches)
-
-# almost the key calculation
-a_df['mean_travel'] =  0.5 * ( a_df.a2b_time_b - a_df.a2b_time_a + a_df.b2a_time_a - a_df.b2a_time_b)
-
-# This is what I want: 
-#a_df['clock_skew']=0.5*(a_df.a2b_time_b+a_df.b2a_time_b) - 0.5*(a_df.a2b_time_a + a_df.b2a_time_a)
-# But date arithmetic requires it be done in a different order:
-a_df['clock_skew']=0.5*(  a_df.a2b_time_b - a_df.a2b_time_a + a_df.b2a_time_b - a_df.b2a_time_a)
-
-
-# - the mean_travel looks good. it's around 75ms, which is reasonable
-# the variation is in good agreement with the variation in temperature.
-# there is a bit of ghosting from (a) when a receiver doesn't hear its
-# real pulse but does hear a bounce, and (b) some evidence of multipath
-# between the two stations.
-
-# as temperature increases, travel time decreases.
-# this is the correct relation (https://www.engineeringtoolbox.com/sound-speed-water-d_598.html)
-plt.figure(14).clf()
-fig,axs=plt.subplots(2,1,num=14,sharex=True)
-
-#axs[0].plot( a_df['a2b_time_a'], a_df['mean_travel']/np.timedelta64(1,'us'), 'k.',alpha=0.2,ms=1 ,
-#             label='Mean travel time')
-
-# scatter with the match difference as color. idea being that when this is calculated without
-# shifts, it gets fuzzier, but maybe that's because the mean travel time is thrown off by
-# the drift, and the difference in match times causes that effect to be noisier.
-scat=axs[0].scatter( a_df['a2b_time_a'], a_df['mean_travel']/np.timedelta64(1,'us'),
-                     1, 1e-6*(a_df['match_diff']/np.timedelta64(1,'us')),
-                     alpha=0.2,cmap='jet')
-scat.set_clim([-300,300])
-
-axs[0].plot(all_times, mean_travel_us,'k.',alpha=0.2,ms=1,label='Mean travel time')
-
-#axs[1].plot(A.time,A.temp,label='Temp')
-axs[0].set_ylabel('$\mu$s')
-axs[0].axis(ymin=74e3,ymax=79e3)
-#axs[0].legend(loc='upper right')
-
-plt.colorbar(scat,ax=axs[0])
-
-axs[1].plot( a_df['a2b_time_a'], 1e-6*(a_df['clock_skew']/np.timedelta64(1,'us')), 'k.',alpha=0.2,ms=1,
-             label='clock skew')
-
-axs[1].plot( all_times, clock_skew_us, 'g.',alpha=0.2,ms=1,
-             label='clock skew (cont.)')
-
-axs[1].set_ylabel('Clock skew (s)')
-axs[1].legend(loc='upper right')
-
