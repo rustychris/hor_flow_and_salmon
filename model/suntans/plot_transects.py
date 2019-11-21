@@ -30,7 +30,7 @@ import argparse
 
 parser=argparse.ArgumentParser(description='Plot model-data comparison figures for a run.')
 
-parser.add_argument("-d",'--run-dir',help="Run directory of model")
+parser.add_argument("-d",'--run-dir',help="Run directory of model",required=True)
 args=parser.parse_args()
 
 run_dir=args.run_dir
@@ -77,7 +77,11 @@ for ti,t in enumerate(tran_geoms):
         print("Pulling transect geometry from shapefile")
         xy=np.array(t['geom'])
 
-    tran=model.extract_transect(xy=xy,time=-1,dx=2)
+    if obs is not None:
+        time_sel=obs.time
+    else:
+        time_sel=-1
+    tran=model.extract_transect(xy=xy,time=time_sel,dx=2)
     if tran is None:
         print("No overlap for %s, moving on"%t['name'])
         continue

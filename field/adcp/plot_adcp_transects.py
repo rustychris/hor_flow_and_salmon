@@ -4,6 +4,7 @@ the 2018 ADCP observations
 """
 import read_sontek, summarize_xr_transects
 import glob
+import os
 import six
 import numpy as np
 import xarray as xr
@@ -30,8 +31,8 @@ transect_dirs=glob.glob("040518_BT/*BTref")
 
 for transect_dir in transect_dirs:
     avg_fn=transect_dir+'-avg.nc'
-    if os.path.exists(avg_fn):
-        continue
+    #if os.path.exists(avg_fn):
+    #    continue
     rivr_fns=glob.glob('%s/*.rivr'%transect_dir) + glob.glob('%s/*.riv'%transect_dir)
 
     tran_dss=[ tweak_sontek(read_sontek.surveyor_to_xr(fn,proj='EPSG:26910'))
@@ -53,6 +54,8 @@ for transect_dir in transect_dirs:
         
     ds.attrs['source']=transect_dir
 
+    if os.path.exists(avg_fn):
+        os.unlink(avg_fn)
     ds.to_netcdf(avg_fn)
 
 ##

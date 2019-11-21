@@ -1175,7 +1175,9 @@ if True: # __name__ == '__main__':
     shp_file = 'receiver_range_polygon.shp'
     fig_dir = 'figs_trusted'
     csv_dir = 'csv'
-    hydro_fname = 'segments_2m-model20190314.csv'
+    #hydro_fname = 'segments_2m-model20190314.csv'
+    # This should be the newest, actually dating from 11/21/2019.
+    hydro_fname = '../../../field/tags/segments_m-model20191104.csv'
     outlier_methods = ['Poly','Dry','Iterative']
     #outlier_params = [[sur.names,sur.polys],[-3.0],[2.0]]
 
