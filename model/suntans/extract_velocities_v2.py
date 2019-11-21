@@ -5,6 +5,8 @@
 """
 Extract point velocity estimates.
 """
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from scipy.interpolate import LinearNDInterpolator
 
@@ -33,7 +35,10 @@ segments=pd.read_csv(inp_fn)
 
 # choose the last run of a sequence:
 #mod=sun_driver.SuntansModel.load('runs/snubby_cfg003_20180411')
-mod=sun_driver.SuntansModel.load('runs/cfg006_20180310_20180310')
+# this run had a bad BC
+#mod=sun_driver.SuntansModel.load('runs/cfg006_20180310_20180310')
+# trying again...
+mod=sun_driver.SuntansModel.load('runs/cfg007_20180409')
 
 seq=mod.chain_restarts()
 run_starts=np.array([mod.run_start for mod in seq])
@@ -299,7 +304,7 @@ if 1: # scatter with vorticity
     
 ##
 
-out_fn=inp_fn.replace(".csv","-model20191022.csv")
+out_fn=inp_fn.replace(".csv","-model20191104.csv")
 assert out_fn!=inp_fn
 
 joined.to_csv(out_fn,index=False)

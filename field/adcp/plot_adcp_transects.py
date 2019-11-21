@@ -4,6 +4,7 @@ the 2018 ADCP observations
 """
 import read_sontek, summarize_xr_transects
 import glob
+import os
 import six
 import numpy as np
 import xarray as xr
@@ -56,6 +57,7 @@ geoms=[]
 
 for transect_dir in transect_dirs:
     avg_fn=transect_dir+'-avg.nc'
+
     rivr_fns=glob.glob('%s/*.rivr'%transect_dir) + glob.glob('%s/*.riv'%transect_dir)
     assert len(rivr_fns)
 
@@ -64,7 +66,7 @@ for transect_dir in transect_dirs:
         return [ tweak_sontek(read_sontek.surveyor_to_xr(fn,proj='EPSG:26910'))
                  for fn in rivr_fns ]
 
-    if write_nc and (not os.path.exists(avg_fn)):
+    if write_nc and (force or not os.path.exists(avg_fn)):
         ds=xr_transect.average_transects(tran_dss())
 
         ds['U']=('sample','layer','xy'), np.concatenate( (ds.Ve.values[:,:,None],
@@ -78,6 +80,10 @@ for transect_dir in transect_dirs:
             var_methods=[ ('U',dict(xy=0),'linear','constant'),
                           ('U',dict(xy=1),'linear','constant') ]
             ds=xr_transect.extrapolate_vertical(tran,var_methods,eta=0)
+
+        if os.path.exists(avg_fn):
+            os.unlink(avg_fn)
+        ds.to_netcdf(avg_fn)
 
         ds.attrs['source']=transect_dir
 
@@ -95,7 +101,6 @@ for transect_dir in transect_dirs:
 if write_shp:
     wkb2shp.wkb2shp(shp_fn,geoms)
     
-
 ##
 six.moves.reload_module(summarize_xr_transects)
 

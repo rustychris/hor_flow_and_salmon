@@ -47,6 +47,8 @@ def base_model(run_dir,run_start,run_stop,
         model=old_model.create_restart()
 
     model.manual_z_offset=-4
+    model.z_offset=0.0 # moving away from the semi-automated datum shift to manual shift
+    
     model.projection="EPSG:26910"
 
     model.set_run_dir(run_dir,mode='pristine')
@@ -108,6 +110,7 @@ def base_model(run_dir,run_start,run_stop,
 
     model.config['ntout']=int(1800./dt)
     model.config['ntoutStore']=int(3600./dt)
+    # isn't this just duplicating the setting from above?
     model.z_offset=0.0 # moving away from the semi-automated datum shift to manual shift
 
     model.add_gazetteer("../grid/snubby_junction/forcing-snubby-01.shp")
@@ -134,7 +137,7 @@ def base_model(run_dir,run_start,run_stop,
                                     filters=[dfm.Transform(fn=lambda x: -x,fn_da=fill)],
                                     cache_dir=cache_dir)
         h_old_river=drv.CdecStageBC(name='Old_River',station="OH1",cache_dir=cache_dir,
-                                    filters=[dfm.Transform(fn=lambda x: x+model.z_offset)])
+                                    filters=[dfm.Transform(fn=lambda x: x+model.manual_z_offset)])
 
     model.add_bcs([Q_upstream,Q_downstream,h_old_river])
 
