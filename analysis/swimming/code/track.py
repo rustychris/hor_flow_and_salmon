@@ -112,8 +112,13 @@ class Track(object):
     def set_swim(self, swim_dframe=None):
         self.swim_dframe = swim_dframe
         self.rec_swim = swim_dframe.to_records()
-        uh = self.rec_swim['model_u']
-        vh = self.rec_swim['model_v']
+        # 2019-10-24: RH: I think the original version of the extract velocity
+        #   script just pulled surface velocity, then the updated one pulls
+        #   depth averaged and surface. so use surface here, as the depth averaged
+        #   velocity seems to underestimate a good deal (behaviors are skewed towards
+        #   negative rheotaxis).
+        uh = self.rec_swim['model_u_surf']
+        vh = self.rec_swim['model_v_surf']
         #swim_u = self.rec_swim['u'] - uh
         #swim_v = self.rec_swim['v'] - vh
         swim_u = self.rec_swim['us'] - uh
