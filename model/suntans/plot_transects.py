@@ -164,7 +164,8 @@ for ti,t in enumerate(tran_geoms):
                           xmax=fig.axes[3].axis()[1] )
 
     fig.savefig(os.path.join(fig_dir,"transect-metrics-%s.png"%t['name']))
-    if 1: # For reporting, omit this stuff, and shift legends
+
+    if 0: # For reporting, omit this stuff, and shift legends
         fig.texts=[]
         ax_avg=fig.axes[0]
         ax_avg.legend(bbox_to_anchor=[0,-0.12], loc='upper left')
