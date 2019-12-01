@@ -362,77 +362,86 @@ def test_matches(next_a,next_b,matches,
 
 def match_remainder(next_a,next_b,matches,
                     tnums_a,tnums_b,tags_a,tags_b,
-                    visited=None,full_matches=None,
                     max_shift=20.0,max_drift=0.005,max_delta=0.500,
-                    max_bad_pings=0,
                     verbose=False):
     """
-    Recursively enumerate allowable sequence matches.
+    Iteratively enumerate allowable sequence matches.
     next_a: index into tnums_a of the next unmatched detection
     next_b: ... tnums_b
     matches: list of index pairs ala next_a/b that have been matched.
     """
-    if visited is None:
-        visited={}
-    if full_matches is None:
-        full_matches=[]
-
-    # The recursive calls carry a bunch of constant parameters.
-    # create partials to handle all of that, and then the calls below
-    # only have to specify the changing bits.
-    def do_match(next_a,next_b,matches):
-        return match_remainder(next_a,next_b,matches,
-                               tnums_a,tnums_b,tags_a,tags_b,
-                               visited=visited,full_matches=full_matches,
-                               max_shift=max_shift,max_drift=max_drift,max_delta=max_delta,
-                               max_bad_pings=max_bad_pings,
-                               verbose=verbose)
+    visited={}
+    full_matches=[]
+    
+    # When trying to find a bad ping, keep track of how far the match
+    # got. This might be a little generous, in the sense that these
+    # are tracked separately, and there could be one set of matches
+    # that gets further in a, and a separate set that gets further
+    # in b. maybe that's ok, depending on how these values get used.
+    max_match_a=-1
+    max_match_b=-1
+    
+    stack=[] # tuples of next_a,next_b,matches
+    
     def do_test(next_a,next_b,matches):
         return test_matches(next_a,next_b,matches,tnums_a,tnums_b,tags_a,tags_b,
-                            max_shift=max_shift,max_drift=max_drift,max_delta=max_delta,
-                            max_bad_pings=max_bad_pings)
-        
-    # Check to see if this has already been tried
-    key=(next_a,next_b,tuple(matches))
-    if key in visited: return
-    visited[key]=1
+                            max_shift=max_shift,max_drift=max_drift,max_delta=max_delta)
 
-    if verbose:
-        print(f"match next_a={next_a}  next_b={next_b}  matches={matches}")
-        
-    if not do_test(next_a,next_b,matches):
-        #if verbose or (len(matches)>2):
-        #    print("Failed test at ",matches)
-        pass
-    elif (next_a==len(tnums_a)) and (next_b==len(tnums_b)):
-        # termination condition
-        if len(matches)>0:
-            full_matches.append(matches)
-            print("MATCH")
-    elif (next_a==len(tnums_a)):
-        # finish out b
-        do_match(next_a,len(tnums_b),matches)
-    elif (next_b==len(tnums_b)):
-        # finish out a
-        do_match(len(tnums_a),next_b,matches)
-    else:
-        # is it possible to declare the next two a match?
-        if (tags_a[next_a]==tags_b[next_b]):
-            time_diff=tnums_a[next_a]-tnums_b[next_b]
-            if (np.abs(time_diff)<max_shift):
-                # sure, try a match
-                do_match(next_a+1,next_b+1,matches + [(next_a,next_b)])
-            else:
-                # Tags match, but time diff is too big for max_shift
-                pass
+    stack.append( (next_a,next_b,matches) )
 
-        if tnums_a[next_a]<tnums_b[next_b] + max_shift:
-            # drop which ever one is earlier. doesn't work in general, but I'm not
-            # explicitly including shifts yet
-            do_match(next_a+1,next_b,matches)
-        if tnums_b[next_b]<tnums_a[next_a] + max_shift:
-            do_match(next_a,next_b+1,matches)
-    return full_matches
+    while stack:
+        next_a,next_b,matches = stack.pop()
+
+        # Check to see if this has already been tried
+        key=(next_a,next_b,tuple(matches))
+        if key in visited: continue
+        visited[key]=1
+
+        if verbose:
+            print(f"match next_a={next_a}  next_b={next_b}  matches={matches}")
+
+        if not do_test(next_a,next_b,matches):
+            continue
+        
+        if len(matches):
+            max_match_a=max(max_match_a,matches[-1][0])
+            max_match_b=max(max_match_b,matches[-1][1])
+        
+        if (next_a==len(tnums_a)) and (next_b==len(tnums_b)):
+            # termination condition
+            if len(matches)>0:
+                full_matches.append(matches)
+                print("MATCH")
+                continue
+        elif (next_a==len(tnums_a)):
+            # finish out b
+            stack.append( (next_a,len(tnums_b),matches) )
+        elif (next_b==len(tnums_b)):
+            # finish out a
+            stack.append( (len(tnums_a),next_b,matches) )
+        else:
+            # This ordering will prefer chasing down matches before
+            # trying to drop things. Hopefully that means that we'll
+            # find the non-empty match first, and could potentially stop
+            # early if that is sufficient.
+            if tnums_a[next_a]<tnums_b[next_b] + max_shift:
+                # drop which ever one is earlier. doesn't work in general, but I'm not
+                # explicitly including shifts yet
+                stack.append( (next_a+1,next_b,matches) )
+            if tnums_b[next_b]<tnums_a[next_a] + max_shift:
+                stack.append( (next_a,next_b+1,matches) )
+
+            # is it possible to declare the next two a match?
+            if (tags_a[next_a]==tags_b[next_b]):
+                time_diff=tnums_a[next_a]-tnums_b[next_b]
+                if (np.abs(time_diff)<max_shift):
+                    # sure, try a match
+                    stack.append( (next_a+1,next_b+1,matches + [(next_a,next_b)]) )
+                else:
+                    # Tags match, but time diff is too big for max_shift
+                    pass
+
+    return full_matches,max_match_a,max_match_b
     
 
 ##
@@ -447,10 +456,9 @@ tags_a=tag_to_num(rx_tags[id_a])
 tags_b=tag_to_num(rx_tags[id_b])
     
 print(f"Aligning {len(tnums_a)} hits at {names[id_a]} with {len(tnums_b)} at {names[id_b]}")
-full_matches=match_remainder(0,0,[],
-                             tnums_a=tnums_a,tnums_b=tnums_b,
-                             tags_a=tags_a,tags_b=tags_b)
-
+full_matches,max_a,max_b=match_remainder(0,0,[],
+                                         tnums_a=tnums_a,tnums_b=tnums_b,
+                                         tags_a=tags_a,tags_b=tags_b)
 
 print(f"Found {len(full_matches)} potential sets of matches")
 
@@ -503,26 +511,30 @@ def merge_detections(tnums_a,tnums_b,tags_a,tags_b,matches):
 
 ##
 
-#ids=[3,12,2,
-#     #1, 0, 6, 9, 11 # These fail when incremental, or after all the good ones
-#     4,5,7,8,10,13,
-#]
+# Any match between two sequences is allowed to drop 2 detections.
+# These are always dropped from sequence 'a'.
+# seems that the one bad ping in 2 can take out multiple other pings.
+# So incrementally try dropping pings from one side or the other
+# until somebody succeeds.
+# It's not quite optimal, but at least it gets through the list
+# regardless (so far) of order.
 
-# HERE:
-#  can get pretty far, but can't quite get through everybody.
-#  possibilities:
-#    the errors are accumulating, such that by the time I get near
-#    the end, it's too hard to satisfy the thresholds, or..
-#    there are some bad detects, such that some combinations
-#    are impossible.
-#    
-ids=[0,1,3,12,4,5,7,8,10,13,9,11]# These work
-#      2,6 # these fail.
+max_bad_apples=10
 
-# 2 has one bad ping, 58
-#  => can bisect to find one bad ping
+ids=[2,3, 12,
+     1, 0, ]
+#6, 9, 11,
+#     4,5,7,8,10,13 ]
+
+# ids=[0,1,3,12,2,
+#      6, 9, 11,
+#      4,5,7,8,10,13 ]
+
+# This sequence works.
+# ids=[0,1,3,12,4,5,7,8,10,13,9,11,2,6]
+#  6 will still fail
+
 # 6(AM8) only detects 45, and nobody else sees 45 (!) FF09
-#  => should preprocess a bit and skip out when there are no tags in common.
 
 id_b=ids[0]
 tnums_b=rx_tnums[id_b]
@@ -536,103 +548,64 @@ for id_a in ids[1:]:
     
     print(f"Aligning {len(tnums_a)} hits at {name_a} ({id_a}) with {len(tnums_b)} at {name_b}")
 
-    nrecur= 3*(len(tnums_a)+len(tnums_b))
-    if sys.getrecursionlimit() < nrecur:
-        print(f"Hang on -- increasing recursion limit to {nrecur}.")
-        sys.setrecursionlimit(nrecur)
-        
-    full_matches=match_remainder(0,0,[],
-                                 tnums_a=tnums_a,tnums_b=tnums_b,
-                                 tags_a=tags_a,tags_b=tags_b)
-    if len(full_matches)==0:
+    # In some cases a tag is only seen by one or the other set.  no hope for a match,
+    # and the current data structure can't record that a subset of the tag detections
+    # have an unconstrained clock.  So punt.  A slightly better solution would be
+    # to optimize the order of receivers to maximize overlap. Might still arrive
+    # at a situation where there is no intersection, or worse, a case where there are
+    # two distinct groups, but no commonality between them.
+    common_tags=np.intersect1d( np.unique(tags_b),np.unique(tags_a) )
+    if len(common_tags)==0:
+        print(f"{name_a} and {name_b} have no common tags")
+        continue
+
+    bad_apple_search=[ ([], []) ] # each entry a tuple of bad_apples_a, bad_apples_b
+    
+    while bad_apple_search:
+        bad_a,bad_b=bad_apple_search.pop(0) # Breadth-first
+
+        # construct the a and b subsets
+        if len(bad_a):
+            a_slc=np.ones(len(tnums_a),np.bool8)
+            a_slc[ bad_a ]=False
+            print(f"Trying bad_apples_a={bad_a}")
+        else:        
+            a_slc=slice(None)
+            
+        if len(bad_b):
+            b_slc=np.ones(len(tnums_b),np.bool8)
+            b_slc[ bad_b ]=False
+            print(f"Trying bad_apples_b={bad_b}")
+        else:        
+            b_slc=slice(None)
+            
+        full_matches,max_a,max_b=match_remainder(0,0,[],
+                                                 tnums_a=tnums_a[a_slc],tnums_b=tnums_b[b_slc],
+                                                 tags_a=tags_a[a_slc],tags_b=tags_b[b_slc])
+        if len(full_matches):
+            break
+        else:
+            # Currently search by dropping bad pings only on one side at a time
+            # if there are no bad apples yet, then queue up a search on both sides.
+            # otherwise, queue up a search extending the side we're on.
+            if not bad_b: 
+                next_bad_a=np.arange(len(tnums_a))[a_slc][max_a+1]
+                bad_apple_search.append( (bad_a+[next_bad_a],bad_b))
+            if not bad_a:
+                next_bad_b=np.arange(len(tnums_b))[b_slc][max_b+1]
+                bad_apple_search.append( (bad_a,bad_b+[next_bad_b]) )
+    else:
         print(f"Well - the streak has ended. {name_a} and {name_b} yielded no matches")
         break
-    
+        
     longest=np.argmax( [len(m) for m in full_matches] )
     print(f"Found {len(full_matches)} potential sets of matches, longest is {len(full_matches[longest])} (i={longest})")
 
-    # update b to be the combination
-    tnums_b,tags_b=merge_detections(tnums_a,tnums_b,tags_a,tags_b,full_matches[longest])
+    # update b to be the combination, and here we drop the 'bad apples'
+    tnums_b,tags_b=merge_detections(tnums_a[a_slc],tnums_b[b_slc],tags_a[a_slc],tags_b[b_slc],
+                                    full_matches[longest])
     name_b=name_b+"-"+name_a
-##
-
-id_a=2
-
-b_slc=slice(None) 
-tnums_a=rx_tnums[id_a]
-tags_a=tag_to_num(rx_tags[id_a])
-
-# this makes things more annoying.
-# How can I detect which pings aren't real?
-#  If it's a single bad ping, can bisect the failure
-
-
-if 1:
-    a_slc=slice(None)
-    #a_slc=slice(0,1) # for 6, this still fails.
-    #a_slc=slice(3,None)
-
-    # even a significant relaxation of the thresholds gets nowhere.
-    # trimming a to be very short doesn't help.
-    full_matches=match_remainder(0,0,[],
-                                 tnums_a=tnums_a[a_slc],tnums_b=tnums_b[b_slc],
-                                 tags_a=tags_a[a_slc],tags_b=tags_b[b_slc],
-                                 max_shift=40.,max_drift=0.03,max_delta=0.75)
-    print(full_matches)
-    if len(full_matches):
-        test_matches(len(tnums_a[a_slc]),len(tnums_b),full_matches[0],
-                     tnums_a=tnums_a[a_slc],tnums_b=tnums_b,
-                     tags_a=tags_a[a_slc],tags_b=tags_b,
-                     verbose=True)
-    print()
-    print()
-
-##
-
-# One bad ping can cause two intervals to look bad, and that starts
-# to really slow down the search if two bad pings are allowed.
-# What about a binary search for a specific bad ping?
-# Assume that in the iterative process, the "bad" ping is in a.
-
-# First find the longest prefix that works.
-a_start=0
-a_stop_min=a_start+1 # include at least one 
-a_stop_max=len(tnums_a)
-a_stop=a_stop_max
-bad_apple=None
-while 1:
-    a_slc=slice(a_start,a_stop)
-    print(f"Trying {a_start}:{a_stop} out of {len(tnums_a)}, bounded by ({a_stop_min},{a_stop_max})")
-    full_matches=match_remainder(0,0,[],
-                                 tnums_a=tnums_a[a_slc],tnums_b=tnums_b[b_slc],
-                                 tags_a=tags_a[a_slc],tags_b=tags_b[b_slc],
-                                 max_shift=20.,max_drift=0.01,max_delta=0.50)
-    if len(full_matches):
-        a_stop_min=a_stop
-    else:
-        a_stop_max=a_stop-1
-    if a_stop_max-a_stop_min<=1:
-        bad_apple=a_stop
-        break
-    new_a_stop=(a_stop_max+a_stop_min)//2
-    assert new_a_stop!=a_stop
-    a_stop=new_a_stop
-
-# Can we match the second half?
-a_start=bad_apple+1
-
-a_slc=np.arange(len(tnums_a)!=bad_apple)
-print(f"Trying it without {bad_apple}")
-full_matches=match_remainder(0,0,[],
-                             tnums_a=tnums_a[a_slc],tnums_b=tnums_b[b_slc],
-                             tags_a=tags_a[a_slc],tags_b=tags_b[b_slc],
-                             max_shift=20.,max_drift=0.01,max_delta=0.50)
-if len(full_matches):
-    print("SUCCESS")
-else:
-    print("Still failed")
-
-
+    
 ##
 
 
