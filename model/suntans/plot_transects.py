@@ -41,7 +41,7 @@ model.manual_z_offset=-4 # should be in sync with hor_snubby_oper.py
 tran_shp=os.path.join(base,"../../gis/model_transects.shp")
 tran_geoms=wkb2shp.shp2geom(tran_shp)
 
-fig_dir=os.path.join(model.run_dir,'figs-20190812')
+fig_dir=os.path.join(model.run_dir,'figs-20191121')
 os.path.exists(fig_dir) or os.makedirs(fig_dir)
 
 for ti,t in enumerate(tran_geoms):

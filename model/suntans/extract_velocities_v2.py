@@ -38,7 +38,9 @@ segments=pd.read_csv(inp_fn)
 # this run had a bad BC
 #mod=sun_driver.SuntansModel.load('runs/cfg006_20180310_20180310')
 # trying again...
-mod=sun_driver.SuntansModel.load('runs/cfg007_20180409')
+#mod=sun_driver.SuntansModel.load('runs/cfg007_20180409')
+# This time with proper friction
+mod=sun_driver.SuntansModel.load('/opt2/san_joaquin/cfg008/cfg008_20180409')
 
 seq=mod.chain_restarts()
 run_starts=np.array([mod.run_start for mod in seq])
@@ -304,7 +306,7 @@ if 1: # scatter with vorticity
     
 ##
 
-out_fn=inp_fn.replace(".csv","-model20191104.csv")
+out_fn=inp_fn.replace(".csv","-model20191202.csv")
 assert out_fn!=inp_fn
 
 joined.to_csv(out_fn,index=False)
