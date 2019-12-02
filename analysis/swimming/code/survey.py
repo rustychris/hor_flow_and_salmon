@@ -1163,229 +1163,238 @@ class Survey(object):
 
 
 if True: # __name__ == '__main__':
-    #lines_shp_file = r'R:\UCD\Projects\CDFW_Klimley\GIS\transit_lines.shp'
-    #lines = get_lines_from_shp(lines_shp_file)
-    if 0:
-        flow_fn = 'bc_flows.csv'
-        dtime_msd, q_msd = load_comma_formatted(flow_fn,'MSD')
-        dnums_msd = pylab.date2num(dtime_msd)
-    else:
-        local_csv='msd_2018.csv'
-        df=pd.read_csv('msd_flow_2018.csv')
-        q_msd=df['q_cms'].values
-        dnums_msd=df['dnum'].values
+    # avoid popping up figures as they're generated
+    with plt.rc_context(rc={'interactive': False}):
+        #lines_shp_file = r'R:\UCD\Projects\CDFW_Klimley\GIS\transit_lines.shp'
+        #lines = get_lines_from_shp(lines_shp_file)
+        if 0:
+            flow_fn = 'bc_flows.csv'
+            dtime_msd, q_msd = load_comma_formatted(flow_fn,'MSD')
+            dnums_msd = pylab.date2num(dtime_msd)
+        else:
+            local_csv='msd_2018.csv'
+            df=pd.read_csv('msd_flow_2018.csv')
+            q_msd=df['q_cms'].values
+            dnums_msd=df['dnum'].values
 
-    filename = 'cleaned_half_meter.csv'
-    # filename = r'R:\UCD\Projects\CDFW_Klimley\Observations\telemetry\8294.csv'
-    grd_file = 'FISH_PTM.grd'
-    shp_file = 'receiver_range_polygon.shp'
-    fig_dir = 'figs_trusted'
-    csv_dir = 'csv'
-    #hydro_fname = 'segments_2m-model20190314.csv'
-    # This should be the newest, actually dating from 11/21/2019.
-    hydro_fname = '../../../field/tags/segments_m-model20191104.csv'
-    outlier_methods = ['Poly','Dry','Iterative']
-    #outlier_params = [[sur.names,sur.polys],[-3.0],[2.0]]
+        filename = 'cleaned_half_meter.csv'
+        # filename = r'R:\UCD\Projects\CDFW_Klimley\Observations\telemetry\8294.csv'
+        grd_file = 'FISH_PTM.grd'
+        shp_file = 'receiver_range_polygon.shp'
+        fig_dir = 'figs_trusted'
+        csv_dir = 'csv'
+        # This is what was used in figures for Ed and Mike's presentations
+        # I believe it's from a 2D suntans run.
+        #hydro_fname = '../../field/tags/segments_2m-model20190314.csv'
+        # This has the most recent hydro, and a more recent segments input
+        # than 20190314, but the results don't look as good. maybe because
+        # of using model_u, instead of model_u_surf.  trying now with
+        # track.py changed to use model_{u,v}_surf
+        hydro_fname = '../../../field/tags/segments_m-model20191022.csv'
+        # This is somewhere in between.
+        #hydro_fname = '../../../field/tags/segments_m-model20190710.csv'
+        outlier_methods = ['Poly','Dry','Iterative']
+        #outlier_params = [[sur.names,sur.polys],[-3.0],[2.0]]
 
-    os.path.exists(fig_dir) or os.makedirs(fig_dir)
+        os.path.exists(fig_dir) or os.makedirs(fig_dir)
 
-    autocorr = False
-    if autocorr:
-        trusted_tracks_ac=['7629']
-        sur = Survey(filename, grd_file, shp_file, trackIDs=trusted_tracks_ac) 
-        sur.speed_over_ground(masked=False)
-        outlier_params = [[sur.names,sur.polys],[-3.0],[2.0]]
-        sur.identify_outliers(outlier_methods, outlier_params)
-        sur.calc_autocorr(masked=True)
-        raise Exception("Bailing out") # sys.exit(0) # hardwire for now
-    debug = False
-    if debug:
-        # debug first clean point in track 8294
-        trusted_tracks=['8294']
-        sur = Survey(filename, grd_file, shp_file, trackIDs=trusted_tracks) 
+        autocorr = False
+        if autocorr:
+            trusted_tracks_ac=['7629']
+            sur = Survey(filename, grd_file, shp_file, trackIDs=trusted_tracks_ac) 
+            sur.speed_over_ground(masked=False)
+            outlier_params = [[sur.names,sur.polys],[-3.0],[2.0]]
+            sur.identify_outliers(outlier_methods, outlier_params)
+            sur.calc_autocorr(masked=True)
+            raise Exception("Bailing out") # sys.exit(0) # hardwire for now
+        debug = False
+        if debug:
+            # debug first clean point in track 8294
+            trusted_tracks=['8294']
+            sur = Survey(filename, grd_file, shp_file, trackIDs=trusted_tracks) 
+            sur.set_directories(default_fig_dir=fig_dir, csv_dir=csv_dir)
+            sur.read_receiver_locations(fname='2018 surveyed_rcv_pos.csv')
+            sur.speed_over_ground(masked=False)
+            outlier_params = [[sur.names,sur.polys],[-3.0],[2.0]]
+            print( "call identify outliers")
+            sur.identify_outliers(outlier_methods, outlier_params)
+            sur.calc_smoothed(masked=True)
+            sur.swimming_speed(hydro_fname, tracks=trusted_tracks)
+            tag=trusted_tracks[0]
+            sur.write_to_csvs(fnames=['tag%s.csv'%tag,
+                                      'tag%s_seg.csv'%tag,
+                                      'tag%s_swim.csv'%tag],
+                              add_smooth=False)
+            raise Exception("Debug output enabled - bailing out")
+
+        # screen tracks
+        process_all_tracks = False 
+        if process_all_tracks:
+            sur = Survey(filename, grd_file, shp_file) # read survey ALL TRACKS
+            sur.set_directories(default_fig_dir=fig_dir, csv_dir=csv_dir)
+            sur.read_receiver_locations(fname='2018 surveyed_rcv_pos.csv')
+            sur.speed_over_ground(masked=False)
+            outlier_params = [[sur.names,sur.polys],[-3.0],[2.0]]
+            sur.identify_outliers(outlier_methods, outlier_params)
+            # plot raw tracks
+            plot_raw = False
+            if plot_raw:
+                sur.plot_pos_single_track(variable='position', color_by='age',
+                                          plot_noise=False, plot_smoothed=False,
+                                          plot_outliers=False, plot_masked_only=False,
+                                          plot_changepts=False, show_metrics=False,
+                                          fig_dir='ALL_raw_tracks')
+            # first do screening of track quality for ALL TRACKS
+            plot_outliers = True
+            if plot_outliers:
+                sur.calc_smoothed(masked=True)
+                sur.calculate_quality_metrics(masked=True)
+                sur.classify_by_quality()
+    #           sur.plot_pos_single_track(variable='position', color_by='age',
+    #                                     plot_noise=False, plot_smoothed=False,
+    #                                     plot_outliers=True, plot_masked_only=False,
+    #                                     plot_changepts=False, show_metrics=True,
+    #                                     fig_dir='ALL_plot_outliers')
+                trusted_new = [tag for tag in sur.tracks.keys() 
+                               if tag not in sur.exclude_tracks]
+            plot_cleaned = False
+            if plot_cleaned:
+                sur.plot_pos_single_track(variable='position', color_by='age',
+                                          plot_noise=False, plot_smoothed=False,
+                                          plot_outliers=False, plot_masked_only=True,
+                                          plot_changepts=False, show_metrics=False,
+                                          fig_dir='plot_cleaned')
+
+
+        # From here down restart to work with "trusted tracks"
+        # manualy selected tracks
+        #   trusted_tracks=['7265','72d1','74a1','74ab','7528','752b','7566','7567','7629','7659','768a','76b1','76b7','772a','7895','796d','79ab','7a85','7a96','7a99','7b49','7b4b','7b65','7ba9','7ca5','7d29','7dd5','8255','8292','7435']
+        # extracted from unique ids in segments_2m-model20190314.csv
+        trusted_tracks=['8255', '7dd5', '7b4b', '796d', '74ab', '8292', '72d1', '7659',
+                        '752b', '7ba9', '768a', '7265', '772a', '7a85', '7d29', '7435',
+                        '74a1', '7a99', '7b65', '7629', '7b49', '7566', '7567', '76b7',
+                        '76b1', '7a96', '7ca5', '79ab', '7528', '7895']
+        # Just the ones used in Mike's ppt:
+        trusted_tracks=['7567','772a', '8255', '7b65',  '8292', '7a96']
+        # screening based on fraction detects 
+        #   trusted_tracks = ['8255', '7c55', '796d', '75d3', '75d5', '7af5', '752b', '7454', '768a', '7ca5', '7615', '7a85', '7d65', '76da', '7b49', '725b', '7cb5', '7a99', '7d55', '76d3', '7256', '769a', '76d9', '7a96', '7a95', '7522', '755b', '79ab', '7528', '7895', '82a4', '7b2b', '755e', '7975', '78ab', '754f', '7435', '77a5', '82d5', '7629', '7bd5', '7599', '7275', '7492', '772a', '7b4d', '7b4b', '8292', '74ca', '74cb', '7659', '7d25', '7499', '7269', '74dd', '7265', '75b6', '7d29', '7aa3', '76a7', '7555', '734d', '74c9', '7a51', '7566', '7567', '76ad', '76ae', '76af', '7692', '7ab2', '74b5', '7289', '7ad7', '74ab', '7d49', '72d1', '7aed', '7ba9', '7577', '76bd', '758a', '74a1', '75c9', '7ae9', '7a6a', '836a', '75ba', '8294', '728d', '7b65', '7adb', '82ba', '76b7', '76b1', '76cb', '7585', '7acd']
+        # trusted_tracks = ['8255', '7c55', '796d', '75d5', '752b', '7454', '768a', '7ca5', '7615', '7a85', '7b49',
+        #                   '7cb5', '7a99', '7d55', '76d9', '7a96', '7a95', '7528', '7895', '7b2b', '7435', '77a5',
+        #                   '82d5', '7629', '7bd5', '7275', '7b4d', '8292', '74ca', '7659', '7499', '7265', '7d29',
+        #                   '734d', '7a51', '7566', '7567', '76af', '7ab2', '7ad7', '74ab', '7d49', '72d1', '7577',
+        #                   '74a1', '7ae9', '7a6a', '7b65', '7adb', '76b7', '76b1', '7acd']
+
+        # RH - debugging track 7c55, which is supposed to be trusted, yet it has no segments.
+        # trusted_tracks=['7c55']
+        # screening: ndetects > 25, t_transit < 1 hour
+
+        sur = Survey(filename, grd_file, shp_file, trackIDs=trusted_tracks) # read survey
         sur.set_directories(default_fig_dir=fig_dir, csv_dir=csv_dir)
         sur.read_receiver_locations(fname='2018 surveyed_rcv_pos.csv')
         sur.speed_over_ground(masked=False)
         outlier_params = [[sur.names,sur.polys],[-3.0],[2.0]]
-        print( "call identify outliers")
         sur.identify_outliers(outlier_methods, outlier_params)
         sur.calc_smoothed(masked=True)
-        sur.swimming_speed(hydro_fname, tracks=trusted_tracks)
-        tag=trusted_tracks[0]
-        sur.write_to_csvs(fnames=['tag%s.csv'%tag,
-                                  'tag%s_seg.csv'%tag,
-                                  'tag%s_swim.csv'%tag],
-                          add_smooth=False)
-        raise Exception("Debug output enabled - bailing out")
-
-    # screen tracks
-    process_all_tracks = False 
-    if process_all_tracks:
-        sur = Survey(filename, grd_file, shp_file) # read survey ALL TRACKS
-        sur.set_directories(default_fig_dir=fig_dir, csv_dir=csv_dir)
-        sur.read_receiver_locations(fname='2018 surveyed_rcv_pos.csv')
-        sur.speed_over_ground(masked=False)
-        outlier_params = [[sur.names,sur.polys],[-3.0],[2.0]]
-        sur.identify_outliers(outlier_methods, outlier_params)
-        # plot raw tracks
-        plot_raw = False
-        if plot_raw:
-            sur.plot_pos_single_track(variable='position', color_by='age',
-                                      plot_noise=False, plot_smoothed=False,
-                                      plot_outliers=False, plot_masked_only=False,
-                                      plot_changepts=False, show_metrics=False,
-                                      fig_dir='ALL_raw_tracks')
-        # first do screening of track quality for ALL TRACKS
-        plot_outliers = True
-        if plot_outliers:
-            sur.calc_smoothed(masked=True)
-            sur.calculate_quality_metrics(masked=True)
-            sur.classify_by_quality()
-#           sur.plot_pos_single_track(variable='position', color_by='age',
-#                                     plot_noise=False, plot_smoothed=False,
-#                                     plot_outliers=True, plot_masked_only=False,
-#                                     plot_changepts=False, show_metrics=True,
-#                                     fig_dir='ALL_plot_outliers')
-            trusted_new = [tag for tag in sur.tracks.keys() 
-                           if tag not in sur.exclude_tracks]
-        plot_cleaned = False
+        plot_cleaned = True
         if plot_cleaned:
+            print( "plot cleaned")
             sur.plot_pos_single_track(variable='position', color_by='age',
                                       plot_noise=False, plot_smoothed=False,
                                       plot_outliers=False, plot_masked_only=True,
                                       plot_changepts=False, show_metrics=False,
-                                      fig_dir='plot_cleaned')
+                                      fig_dir='plot_cleaned_trusted')
+        plot_smoothed = True
+        if plot_smoothed:
+            print( "plot smoothed")
+            sur.plot_pos_single_track(variable='position', color_by='age',
+                                      plot_noise=False, plot_smoothed=True,
+                                      plot_outliers=False, plot_masked_only=True,
+                                      plot_changepts=False, show_metrics=False,
+                                      fig_dir='plot_smoothed_trusted')
+        sur.find_change_points(tracks=trusted_tracks)
+        sur.find_change_points_fill(tracks=trusted_tracks)
+        plot_changepts = False
+        if plot_changepts:
+            print( "plot changepoints")
+            sur.plot_pos_single_track(variable='position', color_by='age',
+                                      plot_noise=False, plot_smoothed=True,
+                                      plot_outliers=False, plot_masked_only=True,
+                                      plot_changepts=True, show_metrics=False,
+                                      tracks=trusted_tracks,
+                                      fig_dir='plot_changepts_trusted')
+        plot_changepts_fill = False
+        if plot_changepts_fill:
+            print( "plot changepoints_fill")
+            sur.plot_pos_single_track(variable='position', color_by='age',
+                                      plot_noise=False, plot_smoothed=True,
+                                      plot_outliers=False, plot_masked_only=True,
+                                      plot_changepts=False, 
+                                      plot_changepts_fill=True, 
+                                      show_metrics=False,
+                                      tracks=trusted_tracks,
+                                      fig_dir='plot_changepts_fill_trusted')
+        sur.speed_over_ground(masked=True)
+        plot_speed = True
+        if plot_speed:
+            print( "plot speed over ground")
+            sur.plot_speed_single_track(variable='speed_over_ground', 
+                                        color_by='age',
+                                        show_metrics=False,
+                                        time_series=True, 
+                                        histograms=False, 
+                                        fig_dir='speed_over_ground_trusted',
+                                        masked=True,
+                                        tracks=trusted_tracks)
+        sur.swimming_speed(hydro_fname, tracks=trusted_tracks)
+        plot_swim = True
+        if plot_swim:
+            print( "plot swimming speed")
+            sur.plot_speed_single_track(variable='swimming_speed', 
+                                        plot_detects=False,
+                                        show_metrics=False,
+                                        histograms=True,
+                                        fig_dir='swim_speed_trusted',
+                                        masked=True,
+                                        tracks=trusted_tracks)
+        plot_hydro = False
+        if plot_hydro:
+            print( "plot hydro speed")
+            sur.plot_speed_single_track(variable='hydro_speed', 
+                                        plot_detects=False,
+                                        show_metrics=False,
+                                        histograms=False,
+                                        fig_dir='hydro_speed_trusted',
+                                        masked=True,
+                                        tracks=trusted_tracks)
 
+        #   sur.calc_crossings(lines, tracks=trusted_tracks)
+        #   sur.plot_transit_times_z(tracks=trusted_tracks)
+        if dnums_msd is not None:
+            sur.plot_transit_times_flow(tracks=trusted_tracks, 
+                                        dnums_q=dnums_msd, q=q_msd)
+        else:
+            print("-"*20 + "No transit time -- missing dnums_msd" + "-"*20)
 
-    # From here down restart to work with "trusted tracks"
-    # manualy selected tracks
-    #   trusted_tracks=['7265','72d1','74a1','74ab','7528','752b','7566','7567','7629','7659','768a','76b1','76b7','772a','7895','796d','79ab','7a85','7a96','7a99','7b49','7b4b','7b65','7ba9','7ca5','7d29','7dd5','8255','8292','7435']
-    # extracted from unique ids in segments_2m-model20190314.csv
-    trusted_tracks=['8255', '7dd5', '7b4b', '796d', '74ab', '8292', '72d1', '7659',
-                    '752b', '7ba9', '768a', '7265', '772a', '7a85', '7d29', '7435',
-                    '74a1', '7a99', '7b65', '7629', '7b49', '7566', '7567', '76b7',
-                    '76b1', '7a96', '7ca5', '79ab', '7528', '7895']
-    # Just the ones used in Mike's ppt:
-    trusted_tracks=['7567','772a', '8255', '7b65',  '8292', '7a96']
-    # screening based on fraction detects 
-    #   trusted_tracks = ['8255', '7c55', '796d', '75d3', '75d5', '7af5', '752b', '7454', '768a', '7ca5', '7615', '7a85', '7d65', '76da', '7b49', '725b', '7cb5', '7a99', '7d55', '76d3', '7256', '769a', '76d9', '7a96', '7a95', '7522', '755b', '79ab', '7528', '7895', '82a4', '7b2b', '755e', '7975', '78ab', '754f', '7435', '77a5', '82d5', '7629', '7bd5', '7599', '7275', '7492', '772a', '7b4d', '7b4b', '8292', '74ca', '74cb', '7659', '7d25', '7499', '7269', '74dd', '7265', '75b6', '7d29', '7aa3', '76a7', '7555', '734d', '74c9', '7a51', '7566', '7567', '76ad', '76ae', '76af', '7692', '7ab2', '74b5', '7289', '7ad7', '74ab', '7d49', '72d1', '7aed', '7ba9', '7577', '76bd', '758a', '74a1', '75c9', '7ae9', '7a6a', '836a', '75ba', '8294', '728d', '7b65', '7adb', '82ba', '76b7', '76b1', '76cb', '7585', '7acd']
-    # trusted_tracks = ['8255', '7c55', '796d', '75d5', '752b', '7454', '768a', '7ca5', '7615', '7a85', '7b49',
-    #                   '7cb5', '7a99', '7d55', '76d9', '7a96', '7a95', '7528', '7895', '7b2b', '7435', '77a5',
-    #                   '82d5', '7629', '7bd5', '7275', '7b4d', '8292', '74ca', '7659', '7499', '7265', '7d29',
-    #                   '734d', '7a51', '7566', '7567', '76af', '7ab2', '7ad7', '74ab', '7d49', '72d1', '7577',
-    #                   '74a1', '7ae9', '7a6a', '7b65', '7adb', '76b7', '76b1', '7acd']
-
-    # RH - debugging track 7c55, which is supposed to be trusted, yet it has no segments.
-    # trusted_tracks=['7c55']
-    # screening: ndetects > 25, t_transit < 1 hour
-    
-    sur = Survey(filename, grd_file, shp_file, trackIDs=trusted_tracks) # read survey
-    sur.set_directories(default_fig_dir=fig_dir, csv_dir=csv_dir)
-    sur.read_receiver_locations(fname='2018 surveyed_rcv_pos.csv')
-    sur.speed_over_ground(masked=False)
-    outlier_params = [[sur.names,sur.polys],[-3.0],[2.0]]
-    sur.identify_outliers(outlier_methods, outlier_params)
-    sur.calc_smoothed(masked=True)
-    plot_cleaned = True
-    if plot_cleaned:
-        print( "plot cleaned")
-        sur.plot_pos_single_track(variable='position', color_by='age',
-                                  plot_noise=False, plot_smoothed=False,
-                                  plot_outliers=False, plot_masked_only=True,
-                                  plot_changepts=False, show_metrics=False,
-                                  fig_dir='plot_cleaned_trusted')
-    plot_smoothed = True
-    if plot_smoothed:
-        print( "plot smoothed")
-        sur.plot_pos_single_track(variable='position', color_by='age',
-                                  plot_noise=False, plot_smoothed=True,
-                                  plot_outliers=False, plot_masked_only=True,
-                                  plot_changepts=False, show_metrics=False,
-                                  fig_dir='plot_smoothed_trusted')
-    sur.find_change_points(tracks=trusted_tracks)
-    sur.find_change_points_fill(tracks=trusted_tracks)
-    plot_changepts = False
-    if plot_changepts:
-        print( "plot changepoints")
-        sur.plot_pos_single_track(variable='position', color_by='age',
-                                  plot_noise=False, plot_smoothed=True,
-                                  plot_outliers=False, plot_masked_only=True,
-                                  plot_changepts=True, show_metrics=False,
-                                  tracks=trusted_tracks,
-                                  fig_dir='plot_changepts_trusted')
-    plot_changepts_fill = False
-    if plot_changepts_fill:
-        print( "plot changepoints_fill")
-        sur.plot_pos_single_track(variable='position', color_by='age',
-                                  plot_noise=False, plot_smoothed=True,
-                                  plot_outliers=False, plot_masked_only=True,
-                                  plot_changepts=False, 
-                                  plot_changepts_fill=True, 
-                                  show_metrics=False,
-                                  tracks=trusted_tracks,
-                                  fig_dir='plot_changepts_fill_trusted')
-    sur.speed_over_ground(masked=True)
-    plot_speed = True
-    if plot_speed:
-        print( "plot speed over ground")
-        sur.plot_speed_single_track(variable='speed_over_ground', 
-                                    color_by='age',
-                                    show_metrics=False,
-                                    time_series=True, 
-                                    histograms=False, 
-                                    fig_dir='speed_over_ground_trusted',
-                                    masked=True,
-                                    tracks=trusted_tracks)
-    sur.swimming_speed(hydro_fname, tracks=trusted_tracks)
-    plot_swim = True
-    if plot_swim:
-        print( "plot swimming speed")
-        sur.plot_speed_single_track(variable='swimming_speed', 
-                                    plot_detects=False,
-                                    show_metrics=False,
-                                    histograms=True,
-                                    fig_dir='swim_speed_trusted',
-                                    masked=True,
-                                    tracks=trusted_tracks)
-    plot_hydro = False
-    if plot_hydro:
-        print( "plot hydro speed")
-        sur.plot_speed_single_track(variable='hydro_speed', 
-                                    plot_detects=False,
-                                    show_metrics=False,
-                                    histograms=False,
-                                    fig_dir='hydro_speed_trusted',
-                                    masked=True,
-                                    tracks=trusted_tracks)
-
-    #   sur.calc_crossings(lines, tracks=trusted_tracks)
-    #   sur.plot_transit_times_z(tracks=trusted_tracks)
-    if dnums_msd is not None:
-        sur.plot_transit_times_flow(tracks=trusted_tracks, 
-                                    dnums_q=dnums_msd, q=q_msd)
-    else:
-        print("-"*20 + "No transit time -- missing dnums_msd" + "-"*20)
-            
-    output_summary = False
-    if output_summary:
-        print( "integrated plots")
-#       sur.plot_study_area()
-#       sur.write_to_csvs(fnames=['tracks_2.csv','segments_2.csv'])
-        sur.write_to_csvs(fnames=['tracks_2m.csv','segments_2m.csv',
-                                  'swim_2m.csv'], masked=True)
-        sur.calculate_quality_metrics(masked=True) # need for daytime entry calc
-        sur.plot_all_detects(daynight=True, fig_name='all_detects_daynight.png')
-        sur.plot_all_detects(routesel=True, fig_name='all_detects_route.png')
-        sur.plot_swim_uv(tracks=trusted_tracks)
-        sur.plot_swim_uv_daynight(tracks=trusted_tracks)
-        sur.plot_transit_times_daynight(tracks=trusted_tracks)
-        sur.plot_occupancy(normalize=True, masked=True, tracks=trusted_tracks)
-        sur.plot_noise_map(masked=True, tracks=trusted_tracks)
-        sur.plot_cell_detects(normalize=True, masked=True, daynight=True,
-                              tracks=trusted_tracks)
-        sur.plot_cell_speed()
-        sur.plot_non_detects(normalize=True, masked=True, tracks=trusted_tracks)
-        sur.plot_noise_scatter(masked=True)
-# change masked to true below. Need to generalize for smoothed points
-        sur.plot_noise_histograms(trusted_tracks)
-        sur.plot_all_speed_vectors(variable='speed_over_ground')
+        output_summary = False
+        if output_summary:
+            print( "integrated plots")
+    #       sur.plot_study_area()
+    #       sur.write_to_csvs(fnames=['tracks_2.csv','segments_2.csv'])
+            sur.write_to_csvs(fnames=['tracks_2m.csv','segments_2m.csv',
+                                      'swim_2m.csv'], masked=True)
+            sur.calculate_quality_metrics(masked=True) # need for daytime entry calc
+            sur.plot_all_detects(daynight=True, fig_name='all_detects_daynight.png')
+            sur.plot_all_detects(routesel=True, fig_name='all_detects_route.png')
+            sur.plot_swim_uv(tracks=trusted_tracks)
+            sur.plot_swim_uv_daynight(tracks=trusted_tracks)
+            sur.plot_transit_times_daynight(tracks=trusted_tracks)
+            sur.plot_occupancy(normalize=True, masked=True, tracks=trusted_tracks)
+            sur.plot_noise_map(masked=True, tracks=trusted_tracks)
+            sur.plot_cell_detects(normalize=True, masked=True, daynight=True,
+                                  tracks=trusted_tracks)
+            sur.plot_cell_speed()
+            sur.plot_non_detects(normalize=True, masked=True, tracks=trusted_tracks)
+            sur.plot_noise_scatter(masked=True)
+    # change masked to true below. Need to generalize for smoothed points
+            sur.plot_noise_histograms(trusted_tracks)
+            sur.plot_all_speed_vectors(variable='speed_over_ground')
