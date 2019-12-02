@@ -148,7 +148,10 @@ def base_model(run_dir,run_start,run_stop,
     if not model.restart:
         # bathy rms ranges from 0.015 to 1.5
         # 0.5 appears a little better than 1.0 or 0.1
-        cell_z0B=0.1*model.grid.cells['bathy_rms']
+        # cfg007 used 0.1, and the shape was notably not as good
+        # as steady008.
+        # cfg008 will return to 0.5...
+        cell_z0B=0.5*model.grid.cells['bathy_rms']
         e2c=model.grid.edge_to_cells()
         nc1=e2c[:,0]
         nc2=e2c[:,1]
