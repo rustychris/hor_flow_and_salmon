@@ -5,6 +5,8 @@ together, via a Bayesian inference approach.
 Slimmed down from bayes_processing.py
 
 Refactored to keep more metadata from bayes_processing01.py
+
+Try a search based on max likelihood-ish.
 """
 
 import sys
@@ -60,79 +62,6 @@ all_receiver_fns=[
 ]
 
 all_detects=[pt.parse_tek(fn,name=name) for name,fn in utils.progress(all_receiver_fns)]
-
-##
-
-# # def split_on_clock_change(ds):
-# ds=all_detects[8]
-# dbg_filename=ds.det_filename.item().replace('.DET','.DBG')
-# if not os.path.exists(dbg_filename):
-#     print("Split on clock: couldn't find %s"%dbg_filename)
-# 
-# dbg=pd.read_csv(dbg_filename,names=['time','message'])
-# 
-# idx=0
-# 
-# while idx<len(dbg):
-#     if '-Before SYNC' not in dbg.message[idx]:
-#         idx+=1
-#         continue
-#     before_msg=dbg.message[idx]
-#     after_msg=dbg.message[idx+1]
-#     #  Things like
-#     #  03/13/2019 16:25:31, -Before SYNC: FPGA=1552523147.485166  RTC=1552523147.406250 dt=-0.078916
-#     #  03/13/2019 16:25:31, -After SYNC:  FPGA=1552523131.024603  RTC=1552523131.023437 dt=-0.001166
-#     assert '-After SYNC' in after_msg
-#     idx+=2
-# 
-#     break
-
-        
-# SM1 gets its clock reset all over the place.  Have to break that up into separate
-# chunks, and manually shift some of those.
-# Can I get the clock resets from the files?
-# Looks like a
-# stop at 2019-03-25 00:20, starts back at 2019-03-25 19:05.
-# stop at 2019-03-26 15:13, starts back at 2019-03-27 00:17
-# stop at 2019-03-28 09:18, starts back at 2019-03-28 00:19
-
-# CF2 file: shows entries at 2019-03-025 11:04. but not much else.
-# CFG: shows a power up at that same time 2019-03-25 11:04. not much else.
-# DBG: has some other messages.  There is a message 03/26/2019 07:16:45, TIME= command via polling I/F
-# which syncs both clocks.  search for Syncing both or SYNC.
-# the logs might be in unix time, and the above data in local. maybe?
-# There are just a few instances of this TIME= command.
-
-# if that's UTC... and my times are PST... 3/28/2019 01:19:13
-#  8h
- #  03/28/2019 01:19:13, TIME= command via polling I/F  => 03/27/2019 17:19:13. or the other way: 03/28/2019 09:19.
- #   there it is.
- #  03/28/2019 01:19:13, -Node Time 1553764753.824625
- #  03/28/2019 01:19:13, -Cmd Time  1553732345.000000
- #  03/28/2019 01:19:13, -dt        32408.824219
-
-# Each of those TIME commands is followed by by a dt, and either
-# Syncing both RTC and FPGA
-# or
-# -delta time within tolerance=1.500000. Time not set
-
-# ds=all_detects[8]
-# ds_ref=all_detects[0]
-# 
-# #shifts8=np.
-# 
-# plt.clf()
-# fig,axs=plt.subplots(3,1,num=1,sharex=True)
-# for ax,fld in zip(axs,['pressure','temp']):
-#     ax.plot(ds.time, ds[fld], label='SM1')
-#     ax.plot(ds_ref.time, ds_ref[fld],label='AM1')
-#     ax.legend(loc='upper right')
-# 
-# axs[2].plot(ds.time, ds.index)
-# 
-# axs[0].axis( xmin=737137.7210708921,xmax=737151.2882812795)
-# fig.tight_layout()
-
 ##
 
 all_detects_nomp=[pt.remove_multipath(d) for d in all_detects]
@@ -171,22 +100,8 @@ all_detects_nomp=[pt.remove_multipath(d) for d in all_detects]
 #  Trying bad_apples_a=[270]
 
 # This one fails out fairly quickly
-# t_clip=[np.datetime64("2019-03-27 00:00"),
-#         np.datetime64("2019-03-27 01:00")]
-
-# Try some longer periods -- hope for a solid long stretch where
-# I can try some positions.
-
-# focus on the period when C2BA comes through.
-# right in the middle of this 2 hours.
-# When I try that, I don't see C2BA at all.
-# t_clip=[np.datetime64("2019-04-14 13:00"),
-#         np.datetime64("2019-04-14 15:00")]
-
-# Try 7 hours later - yep. So I guess I'm working in UTC, and they report in PDT.
-# I now see C2BA. I get 31 pings with 3 or more receivers.
-t_clip=[np.datetime64("2019-04-14 20:00"),
-        np.datetime64("2019-04-14 22:00")]
+t_clip=[np.datetime64("2019-03-27 00:00"),
+        np.datetime64("2019-03-27 01:00")]
 
 clipped_detects=[ d.isel( index=(d.time.values>=t_clip[0]) & (d.time.values<t_clip[-1]))
                   for d in all_detects_nomp]
@@ -226,10 +141,6 @@ def to_tnum(x):
     """
     return (x-T0)/np.timedelta64(1,'ns') * 1e-9
 
-def from_tnum(x):
-    return T0 + x*1e9*np.timedelta64(1,'ns')
-
-    
 for d in clipped_detects:
     d['tnum']=('index',),to_tnum(d['time'].values)
 
@@ -250,19 +161,20 @@ def test_matches_ds(next_a,next_b,matches,ds_a,ds_b,**kw):
 #   inputs, and left as standalone methods.  At some point
 #   they may be optimized via numba and that will be easier
 #   with simple inputs.
-def test_matches(next_a,next_b,matches,
-                 tnums_a,tnums_b,tags_a,tags_b,
-                 verbose=False,
-                 max_shift=20.0,max_drift=0.005,max_delta=0.500):
+
+
+def match_log_likelihood(next_a,next_b,matches,
+                         tnums_a,tnums_b,tags_a,tags_b,
+                         verbose=False,
+                         max_shift=20.0,max_drift=0.005,max_delta=0.500):
     """
-    return True if the matches so far, having considered
+    Estimate the likelihood of a given set of matches being 'correct'
+    
     up to next_a and next_b, are possible.
     In the case that constraints are violated, if specific culprits
     can be identified return them as a tuple ( [bad a samples], [bad b samples] )
     otherwise, return False.
 
-
-    Search state:
     matches: a list of tuples [ (a_idx,b_idx), ... ]
       noting which pings are potentially the same.
 
@@ -286,11 +198,13 @@ def test_matches(next_a,next_b,matches,
     clocks might be driven by a ping from A->B, and then we look at the error
     of a ping B->A, so the expected error is twice the travel time).
     """
+    
     # special case -- when nothing matches, at least disallow
     # the search from getting too far ahead on one side or the
     # other. Can't force exact chronological order.
     if len(matches)==0:
         # is a too far ahead of b?
+        HERE
         if next_a>0 and next_b<len(tnums_b) and tnums_a[next_a-1]>tnums_b[next_b] + max_shift:
             # we already looked at an a that comes after the next b.
             return ([next_a-1],[next_b])
@@ -457,7 +371,6 @@ def enumerate_matches(tnums_a,tnums_b,tags_a,tags_b,
     # Keep the test result from the longest set of matches
     longest_fail=None
     max_matched=0
-    longest_match=None
     
     stack=[] # tuples of next_a,next_b,matches
     
@@ -483,7 +396,6 @@ def enumerate_matches(tnums_a,tnums_b,tags_a,tags_b,
             if len(matches)>max_matched:
                 max_matched=len(matches)
                 longest_fail=test_result
-                longest_match=matches
             elif len(matches)==max_matched:
                 longest_fail=( list(set( longest_fail[0]+test_result[0])), 
                                list(set( longest_fail[1]+test_result[1])) )
@@ -529,10 +441,6 @@ def enumerate_matches(tnums_a,tnums_b,tags_a,tags_b,
                     # Tags match, but time diff is too big for max_shift
                     pass
 
-    # if len(full_matches)==0:
-    #     print("Failed to complete.  Longest match is ")
-    #     print(longest_match)
-    
     return full_matches,max_match_a,max_match_b,longest_fail
     
 # Fit a pair at a time, combining along the way
@@ -716,7 +624,6 @@ def match_sequences(ds_a,ds_b, max_bad_pings=10,
 
 def match_all(detects,
               max_shift=20.0,max_drift=0.005,max_delta=0.500,
-              max_bad_pings=10,
               verbose=False,max_matches=1):
     """
     detects: list of xr.Dataset, each one giving the time and tags from a single
@@ -748,8 +655,7 @@ def match_all(detects,
 
         ds_b=match_sequences(ds_a,ds_b,
                              max_shift=max_shift,max_drift=max_drift,max_delta=max_delta,
-                             verbose=verbose,max_matches=max_matches,
-                             max_bad_pings=max_bad_pings)
+                             verbose=verbose,max_matches=max_matches)
     return ds_b
 
 ##
@@ -762,66 +668,41 @@ def match_all(detects,
 # drop 2,3,4,5,6,7
 # just matching 0,8 succeeds, but has to drop a bunch.
 
-#print_sequence_pair(clipped_detects[8],
-#                    clipped_detects[0],
-#                    tag_sel='common',count=1000)
+print_sequence_pair(clipped_detects[8],
+                    clipped_detects[0],
+                    tag_sel='common',count=1000)
 
 ## 
+# 16-87: b is ~2 seconds late
+# 16-86: b would be almost 29 seconds early
 
-ds_total=match_all(clipped_detects,
-                   max_shift=20,max_delta=0.200,max_bad_pings=5)
-
-##
-
-def rx_locations_2019():
-    # Need utm for each of the 12 receivers.
-    # 'SM8', 'SM7', 'SM4', 'SM3', 'SM2', 'AM9', 'AM7', 'AM6', 'AM4',
-    # 'AM3', 'AM2', 'AM1'
-
-    deploy2019=pd.read_csv('2019 deployment.csv',names=['shot','y','x','z'],index_col=False)
-    survout=pd.read_csv('multid_survout.csv',names=['shot','y','x','z'],index_col=False)
-    shots=pd.concat([deploy2019,survout],axis=0)
-    shots['rx']=[ rx.split('.')[0].upper() for rx in shots.shot.values]
-
-    grped=shots.groupby('rx').mean()
-    return grped
+ds_total=match_all([ d
+                     for i,d in enumerate(clipped_detects)
+                     if i in [0,8] ],
+                   max_shift=60)
 
 ## 
-# Add some useful metadata:
-beacon_tagns=tag_to_num( [ds.beacon_id for ds in clipped_detects] )
-
-beacons=[]
-rx_x=[]
-rx_y=[]
-rx_z=[]
-
-rx_loc=rx_locations_2019()
-
-for rx in ds_total.rx.values:
-    for ds in clipped_detects:
-        if ds.name==rx:
-            beacons.append(ds.beacon_id.item())
-            break
-    else:
-        beacons.append(None)
-
-    rx_x.append( rx_loc.loc[rx,'x'] )
-    rx_y.append( rx_loc.loc[rx,'y'] )
-    rx_z.append( rx_loc.loc[rx,'z'] )
-
-ds_total['rx_x']=('rx',),rx_x
-ds_total['rx_y']=('rx',),rx_y
-ds_total['rx_z']=('rx',),rx_z
-ds_total['rx_beacon']=('rx',),beacons
+Aligning 100 hits at SM1 with 240 at AM1
+Longest fail:  ([16], [89])
+Trying bad_apples_a=[16]
+Longest fail:  ([18], [96])
+Trying bad_apples_b=[89]
+Longest fail:  ([16], [87])
+Trying bad_apples_a=[16, 19]
+Longest fail:  ([38], [130])
+Trying bad_apples_b=[89, 87]
+Longest fail:  ([16], [86])
+Trying bad_apples_a=[16, 19, 40]
+Longest fail:  ([53], [162])
+Trying bad_apples_b=[89, 87, 86]
+Longest fail:  ([16], [85])
+Trying bad_apples_a=[16, 19, 40, 56]
 
 
-##
-fn=f'pings-{str(t_clip[0])}_{str(t_clip[1])}.nc'
-os.path.exists(fn) and os.unlink(fn)
-ds_total.to_netcdf(fn)
 
-##
 
+
+## 
 # chance of getting some real tracks?
 for tag in np.unique(ds_total.tag.values):
     tagn=tag_to_num(tag)

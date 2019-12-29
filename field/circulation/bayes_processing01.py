@@ -521,8 +521,7 @@ def merge_detections(tnums_a,tnums_b,tags_a,tags_b,matches):
 
 max_bad_apples=10
 
-ids=[2,3, 12,
-     1, 0, ]
+ids=[0,1,2,3,4]
 #6, 9, 11,
 #     4,5,7,8,10,13 ]
 
