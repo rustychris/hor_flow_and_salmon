@@ -26,13 +26,15 @@ outlier_marker = {'Poly':'o',
                   'Tek':'^',
                   'Cross':'>',
                   'Potts':'<',
-                  'Iterative':'v'}
+                  'Iterative':'v',
+                  'Consecutive':'s'}
 outlier_color = {'Poly':'r',
                  'Dry':'r',
                  'Tek':'pink',
                  'Cross':'magenta',
                  'Potts':'salmon',
-                 'Iterative':'r'}
+                 'Iterative':'r',
+                 'Consecutive':'r'}
 
 dt_signal = 5
 age_ticks = [10,100,1000,10000]
@@ -251,16 +253,30 @@ class Track(object):
             ncol = len(self.df_track.columns)
             self.df_track.insert(ncol, 'Dry', flagged[ndry,:])
             self.rec_track = self.df_track.to_records()
-        if 'Iterative' in methods: # need to do this first
+        if 'Consecutive' in methods: # need to do this first
+            ncon = self.outlier_methods.index('Consecutive')
+            print("calling id outliers consecutive")
+            max_vel = self.outlier_params[ncon][0]
+            flagged_con = self.identify_outliers_consecutive(max_vel)
+            for nd in range(self.ndetects):
+                if flagged_con[nd] and not flagged[ndry, nd]:
+                    flagged[ncon, nd] = True
+        if 'Iterative' in methods: # need to do this before Poly
             nit = self.outlier_methods.index('Iterative')
             max_del_vel = self.outlier_params[nit][0]
             print("calling id outliers it")
-            self.identify_outliers_iterative(max_del_vel)
-        if 'Poly' in methods: # need to do this second
+            flagged_it = self.identify_outliers_iterative(max_del_vel)
+            for nd in range(self.ndetects):
+                if flagged_it[nd] and not flagged[ndry, nd]:
+                    flagged[nit, nd] = True
+        if 'Poly' in methods: # need to do this last
             # assumes that Dry and Iterative flags have been set
             nm = self.outlier_methods.index('Poly')
             if 'Dry' in methods and 'Iterative' in methods:
                 tot_flagged = np.maximum(flagged[nit,:],flagged[ndry,:])
+                not_flagged = np.where(tot_flagged == 0)[0]
+            elif 'Dry' in methods and 'Consecutive' in methods:
+                tot_flagged = np.maximum(flagged[ncon,:],flagged[ndry,:])
                 not_flagged = np.where(tot_flagged == 0)[0]
             elif 'Dry' in methods:
                 not_flagged = np.where(flagged[ndry,:] == 0)[0]
@@ -272,7 +288,7 @@ class Track(object):
             ipoly = names.index('upstream')
             poly = polys[ipoly]
             # find last point in upstream poly
-            last_upstream = 0
+            last_upstream = -1
 
             #for nd in range(self.ndetects):
             for nd in not_flagged: # only look at potentially valid pts
@@ -286,15 +302,30 @@ class Track(object):
             ipoly = names.index('downstream')
             poly = polys[ipoly]
             # find first point in downstream poly
-            first_downstream = self.ndetects-1
-            for nd in range(self.ndetects):
-                tr = self.rec_track[nd]
-                pt = geometry.Point([tr.X,tr.Y])
-                if pt.intersects(poly):
-                    if not flagged[ndry,nd]:
+            first_downstream = self.ndetects+1
+            #for nd in range(self.ndetects):
+            for nd in not_flagged: # only look at potentially valid pts
+                if not flagged[nm,nd]: # not flagged as prior to upstream entry
+                    tr = self.rec_track[nd]
+                    pt = geometry.Point([tr.X,tr.Y])
+                    if pt.intersects(poly):
+#                   if not flagged[ndry,nd]:
                         first_downstream = nd
                         break
-            flagged[nm,max(0,first_downstream-1):] = 1
+            flagged[nm,first_downstream:] = 1
+            # check for long first/last segment but do not iterate
+            max_dist = 25. # hardwire
+            flagged_any = np.max(flagged,axis=0)
+            not_flagged = np.where(flagged_any==0)[0]
+            valid_tr = self.rec_track[not_flagged]
+            if len(valid_tr) > 3:
+                valid_seg = self.make_segments(input_rec_track = valid_tr)
+                if valid_seg.dist[0] > max_dist: 
+                    nd_orig = valid_tr[0].nd
+                    flagged[nm,nd_orig] = 1
+                if valid_seg.dist[-1] > max_dist:
+                    nd_orig = valid_tr[-1].nd
+                    flagged[nm,nd_orig] = 1
 
         for nd in range(1,self.ndetects-1):
             seg1 = self.rec_seg[nd-1]
@@ -331,7 +362,7 @@ class Track(object):
             if method == 'Cross':
                 ncol = len(self.df_track.columns)
                 self.df_track.insert(ncol, 'del_vel', cross)
-            if method not in ['Iterative','Dry']: 
+            if method not in ['Iterative','Dry','Consecutive']: 
                 ncol = len(self.df_track.columns)
                 self.df_track.insert(ncol, method, flagged[nm,:])
 
@@ -359,16 +390,16 @@ class Track(object):
 
         return
 
-    def identify_outliers_iterativeJUNK(self, max_del_vel):
+    def identify_outliers_iterative(self, max_del_vel):
         """ iteratively apply delta velocity method """
-        pdb.set_trace()
-        flagged = np.zeros(self.ndetects,np.int32)
         dv_final = np.zeros(self.ndetects,np.float64)
         if 'Dry' in self.outlier_methods:
-            flagged = self.rec_track['Dry']
+            flagged = self.rec_track['Dry'].copy()
         # moved Iterative BEFORE Poly
 #       if 'Poly' in self.outlier_methods:
 #           flagged = np.logical_or(self.rec_track['Poly'], flagged)
+        dv_final = self.del_velocity() # initialize
+        # check first and last position/segment
         niterations = 5
         for nit in range(0,niterations):
             not_flagged = np.where(flagged==0)[0]
@@ -377,66 +408,56 @@ class Track(object):
             nvalid = len(valid_tr)
             if nvalid < 3:
                 self.valid = False
-            else:
-                valid_seg = self.make_segments(input_rec_track = valid_tr)
-                del_vel = self.del_velocity(input_rec_track = valid_tr)
-                for nd in range(1,nvalid-1):
-                    nd_orig = valid_tr[nd].nd
-                    dv_final[nd_orig] = del_vel[nd]
-                    if del_vel[nd] > max_del_vel:
-                        nd_minus1_orig = valid_tr[nd-1].nd
+                return flagged
+            del_vel = self.del_velocity(input_rec_track = valid_tr)
+            for ndv in range(1,nvalid-1):
+                nd_orig = valid_tr[ndv].nd
+                dv_final[nd_orig] = del_vel[ndv]
+                if del_vel[ndv] > max_del_vel:
+                    nd_minus1_orig = valid_tr[ndv-1].nd
+                    #nd_plus1_orig = valid_tr[ndv+1].nd
+                    if del_vel[ndv] > del_vel[ndv-1]:
                         flagged[nd_orig] = 1
-                        if del_vel[nd] > del_vel[nd-1]:
-                            flagged[nd_minus1_orig] = 0 
+                        flagged[nd_minus1_orig] = 0
+                        if self.rec_track['Dry'][nd_minus1_orig]:
+                            pdb.set_trace()
 
-            pdb.set_trace()
-        ncol = len(self.df_track.columns)
-
-        return
-
-    def identify_outliers_iterative(self, max_del_vel):
-        """ iteratively apply delta velocity method """
-        flagged = np.zeros(self.ndetects,np.int32)
-        dv_final = np.zeros(self.ndetects,np.float64)
-        if 'Dry' in self.outlier_methods:
-            flagged = self.rec_track['Dry']
-        # moved Iterative BEFORE Poly
-        #       if 'Poly' in self.outlier_methods:
-        #           flagged = np.logical_or(self.rec_track['Poly'], flagged)
-        # del-velocity is one shorter, so leave last entry as 0
-        # dv_final[i] is then change from i to i+1
-        dv_final[:-1] = self.del_velocity() # initialize
-        niterations = 5
-        for nit in range(0,niterations):
-            print("nit", nit)
-            not_flagged = np.where(flagged==0)[0]
-            valid_tr = self.rec_track[not_flagged]
-            # compute segments associated with valid detects
-            nvalid = len(valid_tr)
-            if nvalid < 3:
-                self.valid = False
-            else:
-                valid_seg = self.make_segments(input_rec_track = valid_tr)
-                del_vel = self.del_velocity(input_rec_track = valid_tr)
-                for nd in range(1,nvalid-1):
-                    nd_orig = valid_tr[nd].nd
-                    dv_final[nd_orig] = del_vel[nd]
-                    if del_vel[nd] > max_del_vel:
-                        nd_minus1_orig = valid_tr[nd-1].nd
-                        flagged[nd_orig] = 1
-                        if del_vel[nd] > del_vel[nd-1]:
-                            flagged[nd_minus1_orig] = 0 
         ncol = len(self.df_track.columns)
         self.df_track.insert(ncol, 'Iterative', flagged)
         ncol = len(self.df_track.columns)
         self.df_track.insert(ncol, 'dv_final', dv_final)
         self.rec_track = self.df_track.to_records()
 
-        return
+        return flagged
+
+    def identify_outliers_consecutive(self, max_vel):
+        """ iteratively apply consecutive high velocity method """
+        if 'Dry' in self.outlier_methods:
+            flagged = self.rec_track['Dry'].copy()
+        niterations = 1
+        for nit in range(0,niterations):
+            not_flagged = np.where(flagged==0)[0]
+            valid_tr = self.rec_track[not_flagged]
+            # compute segments associated with valid detects
+            nvalid = len(valid_tr)
+            if nvalid < 3:
+                self.valid = False
+                return flagged
+            valid_seg = self.make_segments(input_rec_track = valid_tr)
+            for ndv in range(1,nvalid-1):
+                sp1 = valid_seg.speed[ndv-1]
+                sp2 = valid_seg.speed[ndv]
+                if (sp1 > max_vel) and (sp2 > max_vel):
+                    nd_orig = valid_tr[ndv].nd
+                    flagged[nd_orig] = 1
+
+        ncol = len(self.df_track.columns)
+        self.df_track.insert(ncol, 'Consecutive', flagged)
+        ncol = len(self.df_track.columns)
+
+        return flagged
 
     def identify_route_selection(self, mask):
-        #diffY = np.max(self.rec_track.Y[mask]) - 4185880
-        #diffX = 647220 - np.min(self.rec_track.X[mask])
         diffY = self.rec_track.Y[mask[-1]] - 4185870
         diffX = 647230 - self.rec_track.X[mask[-1]]
         if (diffY <= 0) and (diffX <= 0.0):
@@ -1056,13 +1077,14 @@ class Track(object):
             rec_track = rec_track[mask]
         rec_seg = self.make_segments(input_rec_track = rec_track)
         nseg = len(rec_seg)
-        dspeed = np.zeros(nseg, np.float64)
+        dspeed = np.nan*np.ones(nseg+1, np.float64)
         for ns in range(nseg-1):
             seg1 = rec_seg[ns]
             seg2 = rec_seg[ns+1]
             du  = seg1.u - seg2.u
             dv  = seg1.v - seg2.v
-            dspeed[ns] = np.sqrt(du*du + dv*dv)
+            nd = ns + 1
+            dspeed[nd] = np.sqrt(du*du + dv*dv)
 
         return dspeed
 
