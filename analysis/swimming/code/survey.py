@@ -1190,7 +1190,7 @@ if True: # __name__ == '__main__':
         # than 20190314, but the results don't look as good. maybe because
         # of using model_u, instead of model_u_surf.  trying now with
         # track.py changed to use model_{u,v}_surf
-        hydro_fname = '../../../field/tags/segments_m-model20191022.csv'
+        hydro_fname = '../../../field/tags/segments_m-model20191202.csv'
         # This is somewhere in between.
         #hydro_fname = '../../../field/tags/segments_m-model20190710.csv'
         outlier_methods = ['Poly','Dry','Iterative']
