@@ -8,7 +8,18 @@ import matplotlib.pyplot as plt
 from stompy import utils
 
 
-def parse_tek(det_fn,cf2_fn=None,name=None):
+def parse_tek(det_fn,cf2_fn=None,name=None,pressure_range=[110e3,225e3],
+              auto_beacon=True):
+    """
+    det_fn: path to DET file with detection information
+    cf2_fn: optional, read beacon id from CF2 file.  Will attempt to
+      guess this if not specified. 
+    name: string identifier added to dataset
+    pressure_range: valid range of pressures, used to filter the time series
+     to when the receiver was in the water.  pass None to skip any filtering.
+    auto_beacon: if beacon tag ID cannot be read from CF2, this enables choosing
+     the most common received tag as the beacon id.
+    """
     if cf2_fn is None:
         fn=det_fn.replace('.DET','.CF2')
         if os.path.exists(fn):
@@ -45,8 +56,9 @@ def parse_tek(det_fn,cf2_fn=None,name=None):
     # clean up pressure
     # this had been limited to 160e3, but
     # AM9 has a bad calibration (or maybe it's just really deep)
-    df2.loc[ df2.pressure>225e3, 'pressure']=np.nan
-    df2.loc[ df2.pressure<110e3, 'pressure']=np.nan
+    if pressure_range is not None:
+        df2.loc[ df2.pressure<pressure_range[0], 'pressure']=np.nan
+        df2.loc[ df2.pressure>pressure_range[1], 'pressure']=np.nan
 
     # trim to first/last valid pressure
     valid_idx=np.nonzero( np.isfinite(df2.pressure.values) )[0]
@@ -68,8 +80,13 @@ def parse_tek(det_fn,cf2_fn=None,name=None):
         local_tag=cf.iloc[0,1].strip()
         ds['beacon_id']=local_tag
         ds['cf2_filename']=(),cf2_fn
+    elif auto_beacon:
+        beacon_id=df3.groupby('tag').size().sort_values().index[-1]
+        ds['beacon_id']=beacon_id
+        ds['cf2_filename']=None
+        ds['beacon_id'].attrs['source']='received tags'
 
-
+    ds.attrs['pressure_range']=pressure_range
     return ds
 
 def remove_multipath(ds):

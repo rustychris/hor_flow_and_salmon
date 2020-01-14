@@ -3,6 +3,8 @@ Once pings have been matched, read pings and station locations in and
 try to assemble trajectories.
 
 This time, try Stan.
+
+v03: allow sigma_t to be a parameter
 """
 
 import pandas as pd
@@ -126,7 +128,6 @@ data {
  real rx_t[Np,Nb];
  real rx_x[Nb];
  real rx_y[Nb];
- real sigma_t;
  real max_dist;
  real c;
  
@@ -151,6 +152,8 @@ parameters {
  real tx_x_missing[Nxy_missing];
  real tx_y_missing[Nxy_missing];
  real tx_t_missing[Ntx_t_missing];
+
+ real<lower=0.01,upper=100> sigma_t;
 }
 transformed parameters {
  real tx_x[Np];
@@ -172,6 +175,9 @@ model {
   real rx_t_adj;
   real dt;
   real dist;
+
+  // need some limits on this
+  sigma_t ~ cauchy(0,5);
 
   for ( p in 1:Np ) {
     for ( b in 1:Nb ) {
@@ -240,7 +246,7 @@ def build_data(ping_xyt_template,matrix,xyt0,rx_xy):
               i_tx_t_known=np.zeros(0,np.int32),
               tx_t_known=np.zeros(0,np.float64),
               
-              sigma_t=0.005*time_scale, # 0.5ms timing precision
+              # sigma_t=0.005*time_scale, # 0.5ms timing precision
               max_dist=400
               )
     return data
@@ -252,21 +258,13 @@ xyt0,ping_xyt_template,ds_strong,matrix,rx_xy=model_inputs(is_beacon&is_multirx)
 # quite fast
 data=build_data(ping_xyt_template,matrix,xyt0,rx_xy)
 
-#op_shifts=sm.optimizing(data=data,iter=50000,tol_rel_grad=1e4,
-#                        tol_rel_obj=0.01)
-
+op_shifts=sm.optimizing(data=data,iter=50000,tol_rel_grad=1e4,
+                        tol_rel_obj=0.01)
 def set_known_shifts(data):
     data['t_shift_known']=op_shifts['t_shift']
     data['Nshift_missing']=0
     data['i_t_known']=1+np.arange(len(data['t_shift_known']))
     data['i_t_missing']=np.ones(0,np.int32)
-
-for sigma_t in [0.1,0.2,0.5,1.0,2.0,5.0,10.0]:
-    print("------------ %f ------------"%sigma_t)
-    data['sigma_t']=sigma_t
-    op_shifts=sm.optimizing(data=data,iter=50000,tol_rel_grad=1e5,
-                            tol_rel_obj=0.05)
-
 ##
 
 # Now solve for a single ping.  That was fast and gave
