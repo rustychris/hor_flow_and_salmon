@@ -6,6 +6,7 @@ This time, try Stan.
 
 v04: look at 2018 data, first with an eye to detecting flows.
 v05: build on v04, adding linear drift term
+v06: for a promising group of 3 stations, try to fit circulation.
 
 """
 
@@ -58,6 +59,13 @@ parameters {
  // just tune the upper right part of the triangle
  // diagonal is zero.
  real<lower=1.0,upper=10000> ur_dist[Ndist];
+
+ // assuming the stations are given as a single cycle,
+ // so there is one circulation value.
+
+ // it is applied only on the first leg.
+ // that's probably not the right way to do it...
+ real<lower=-5.0,upper=5.0> t_circ;
 }
 transformed parameters {
  real t_shift[Nb];
@@ -80,6 +88,8 @@ model {
   //   // weak prior for distances
   //   ur_dist[b] ~ normal(100,1000);
   // }
+ 
+  real this_circ;
 
   for ( p in 1:Np ) {
     for ( b in 1:Nb ) {
@@ -87,8 +97,16 @@ model {
       int a=tx_beacon[p];
       if ( (!is_nan(rx_t[p,b])) && (!is_nan(rx_t[p,a])) && (a!=b) ) { 
         // try to make it closer to obs ~ distribution(parameters)
+        if(a==1 && b==2) {
+          this_circ=t_circ; 
+        } else if(a==2 && b==2) {
+          this_circ=-t_circ;
+        } else {
+          this_circ=0.0;
+        }
         target += normal_lpdf( rx_t_rel[p,b] | 
                                ur_dist[dist_k[a,b]]/rx_c[p,b]
+                               + this_circ
                                - (t_shift[a] + t_drift[a]*rx_t[p,a])
                                + (t_shift[b] + t_drift[b]*rx_t[p,b]),
                                sigma_t);
@@ -136,7 +154,15 @@ for field in ['rx_x','rx_y','rx_z']:
 # ds=ds_tot.sel(rx=['SM1','SM2','AM9'])
 
 # This is pretty good.  And standard errror of 1us.
-rxs=['SM2','SM3','AM2']
+
+#rxs=['SM2','SM3','AM2'] # CCW.  circulation 0.49m/s (high!)
+#rxs=['SM3','SM2','AM2'] # CW.  circulation -0.49m/s.  At least it matches.
+#rxs=['AM2','SM2','SM3'] # also 0.49 m/s
+# rxs=['AM5','SM2','SM3'] # -0.05m/s.  not good.
+# rxs=['AM9','SM2','SM3'] # -2.3m/s.  Terrible.
+# rxs=['SM2','SM3','SM4'] # 54m/s.  Getting worse.
+# rxs=['SM2','SM3','AM5'] # -0.04m/s.  magnitude ok, but sign is questionable.
+# rxs=['SM1','SM3','AM1'] # 9m/s
 
 ds=ds_tot.sel(rx=rxs)
 
@@ -303,7 +329,7 @@ mask=is_beacon&is_multirx
 
 print(calc_ping_count(mask))
 
-## 
+# 
 
 # 50 samples with a linear fit gets the smallest std. error,
 # about 0.5us. with just SM4 and SM3
@@ -343,115 +369,43 @@ N=len(errors)
 stderr=np.sqrt(1./(N-1) * np.sum(np.array(errors-np.mean(errors))**2))/np.sqrt(len(errors))
 print(f"Mean error: {np.mean(errors):3f} ms  rmse: {np.sqrt(np.mean(np.array(errors)**2)):.3f} ms  std-err: {stderr} ms")
 
+
+
+# t_circ is added to the transit time on top of distance
+# positive for a SM2->SM3 ping,
+# negative for a SM3->SM2 ping.
+# Assuming the coordinates are switched, so SM3 is upstream
+#   of SM2,...and
+# Assuming that river left currents are greater
+#   than river right...
+# then pings SM3=>SM2 are with the flow, and would have a shorter
+# effective distance. so I should get a positive t_circ, on the
+# order of 5us.
+# I do get a positive value, but it's 57us.
+# The distances:
+# SM2=[77m]=>SM3=[70m]=>AM2=[110m]=>SM2.
+# Ltot=total distance: 257.13m
+# speed of sound 1.484785 m/ms
+# What kind of mean velocity along the circle does that imply?
+# so a ping making the circuit CW takes Ltot/c - delta = Ltot/(c+u_circ)
+# a ping making the circuit CCW takes Ltot/c + delta = Ltot/(c-u_circ)
+#  Ltot/c - delta = Ltot/(c+u_circ)
+#  Ltot/c - Ltot/(c+u_circ) = delta
+#  1/c - 1/(c+u_circ) = delta/Ltot
+#  1/c - delta/Ltot = 1/(c+u_circ) 
+#  1/( 1/c - delta/Ltot) - c = u_circ
+delta=op_shifts['t_circ'] # ms
+Ltot=op_shifts['ur_dist'].sum() # m
+c=data['rx_c'].mean() # m/ms
+u_circ=(1./(1./c - delta/Ltot) - c) * 1000. # 0.49 m/s
+
+print(f"Circulation velocity: {u_circ:3f} m/s")
+
 # Not bad.
 # need a higher order t_shift to get the errors down, though.
 # HERE: consider next step:
 #  2: Abandon STAN and continue on the direct approach below
 #  3: Add an additional station, start to look for circulation.
-
-## 
-# For SM1, SM2, AM9
-# SM1 -> SM2: 156m
-# SM1 -> AM9: 65m
-# SM2 -> AM9: 172m
-
-def xy(d):
-    return np.array([d.rx_x.item(),d.rx_y.item()])
-
-mode='coord'
-print("       Results of %s"%(mode))
-      
-print(" "*8,end="")
-
-for bi,b in enumerate(ds_strong.rx.values):
-    print("%6s  "%b,end="")
-print()
-
-for ai,a in enumerate(ds_strong.rx.values):
-    print("%6s  "%a,end="")
-    for bi,b in enumerate(ds_strong.rx.values):
-        if bi<=ai:
-            print("   ---  ",end="")
-        else:
-            if mode=='fit':
-                d=op_shifts['ur_dist'][data['dist_k'][ai,bi]-1]
-            elif mode=='coord':
-                d=utils.dist( xy(ds_tot.sel(rx=a)) - xy(ds_tot.sel(rx=b)))
-            print(" %6.1f "%d,end="")
-    print()
-        
-
-##
-# how does that compare?
-sm1=ds_tot.sel(rx='SM1')
-sm2=ds_tot.sel(rx='SM2')
-sm3=ds_tot.sel(rx='SM3')
-am9=ds_tot.sel(rx='AM9')
-
-print( utils.dist( xy(sm1) - xy(sm2) ) ) # 154
-print( utils.dist( xy(sm1) - xy(am9) ) ) #  64.06 m
-print( utils.dist( xy(sm2) - xy(am9) ) ) # 170.01 m
-print( utils.dist( xy(sm3) - xy(am9) ) ) # 101.72 m
-print( utils.dist( xy(sm3) - xy(sm2) ) ) #  76 m
-print( utils.dist( xy(sm3) - xy(sm1) ) ) #  78 m
-
-# Any chance the labels are all screwed up?
-# the position and names match the csv that Ed has used for plotting.
-# and my netcdf matches the csvs.
-# maybe sm2 and sm3 are swapped?
-
-# pings say sm2 -- sm3 is 77m. coordinates say 76 m.
-# pings say sm2 -- am9 is 173m. coordinates say sm3 - am9 is 170m
-# pings say sm1 -- sm2 is 156m.  coordinates say sm3 - sm1 is 154m
-
-##
-
-for from_i in range(ds_tot.dims['rx']):
-    a=ds_tot.isel(rx=from_i)
-    for to_i in range(from_i+1,ds_tot.dims['rx']):
-        b=ds_tot.isel(rx=to_i)
-        
-        print(f"{a.rx.item()} -- {b.rx.item()}: {utils.dist(xy(a)-xy(b)):2f}")
-
-# obviously a lot of distances...
-# Can I find a triple with distances close to 156, 65, 172?
-# 156:
-#   SM8 -- AM1: 152.339176
-#   SM4 -- AM1: 149.064240
-#   SM3 -- SM1: 153.692747
-#   SM1 -- AM4: 156.327808
-#   AM9 -- AM8: 153.241983
-#   AM9 -- AM4: 157.762345
-# 65:
-#   SM1 -- AM9: 64.062529
-#   SM8 -- AM8: 60.031267
-#   SM9 -- SM8: 71.919590
-#   SM8 -- SM3: 57.791449
-#   SM8 -- AM5: 73.418333
-#   SM3 -- AM5: 57.849344
-#   SM2 -- AM5: 57.136336
-#   SM2 -- AM2: 69.147205
-# 172:
-#   SM1 -- AM8: 171.078165
-#   SM3 -- AM9: 170.014880
-#   SM9 -- AM2: 164.724252
-#   SM4 -- SM1: 182.959514
-
-# Two solutions:
-# AM9 [64] SM1 [171] AM8 [153] AM9
-# AM9 [170] SM3 [154] SM1 [64.0] AM9
-
-
-# So the stations that I thought were SM1, SM2 and AM9
-# could in fact be SM1, AM8 and AM9
-#   or SM1, SM3, and AM9.
-
-# so is it possible that SM1 and AM9 are correct and that
-# SM2 is really AM8 or SM3?
-
-# the coordinates give the distance for SM1-AM9 as 64.062529.
-# and that lines up with the distance that I fit of 65m.
-# 
 
 ##
 
