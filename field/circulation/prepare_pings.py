@@ -28,7 +28,7 @@ def rx_locations_2019():
     return grped
 
 def rx_locations_2018():
-    shots=pd.read_csv("2018_Data/monitor deployment.csv",
+    shots=pd.read_csv("2018_Data/monitor deployment_swap-sm2-sm3.csv",
                       names=['shot','y','x','z'],index_col=False)
     shots['rx']=[ rx.split('.')[0].upper() for rx in shots.shot.values]
     grped=shots.groupby('rx').mean()
@@ -56,7 +56,6 @@ if 0: # 2019 data:
 
 
 ## 
-six.moves.reload_module(pt)
 
 def test_matches_ds(next_a,next_b,matches,ds_a,ds_b,**kw):
     return test_matches(next_a,next_b,matches,
@@ -746,56 +745,62 @@ class PingMatcher(object):
         ds_total['rx_beacon']=('rx',),beacons
         return ds_total
 
-           
-pm=PingMatcher()
-pm.T0=np.datetime64('2018-02-01 00:00')
 
-# 2018 data. no pressure data.
-# Also no CF2 files?  are there any files that do give a beacon id?
-# in DBG, NoiseAlpha=0xFFBE. probably not useful.
-# AM2 should be FF08, based on hearing itself.
+def ping_matcher_2018():
+    # Load up 2018 data
+    
+    pm=PingMatcher()
+    pm.T0=np.datetime64('2018-02-01 00:00')
 
-pm.add_detections(name='AM1',det_fn='2018_Data/AM1_20186009/050318/AM1180711347.DET',
-                  pressure_range=None)
-pm.add_detections(name='AM2',det_fn='2018_Data/AM2_20186008/043018/AM2180711401.DET',
-                  pressure_range=None)
-pm.add_detections(name='AM3',det_fn='2018_Data/AM3_20186006/043018/2018-6006180621239.DET',
-                  pressure_range=None)
-pm.add_detections(name='AM4',det_fn='2018_Data/AM4_20186005/050118/2018-6005180671524.DET',
-                  pressure_range=None)
-pm.add_detections(name='AM5',det_fn='2018_Data/AM5_20186004/050318/2018-6004180671635.DET',
-                  pressure_range=None)
-pm.add_detections(name='AM8',det_fn='2018_Data/AM8_20186002/043018/2018-6002180401450.DET',
-                  pressure_range=None)
-pm.add_detections(name='AM9',det_fn='2018_Data/AM9_20186001/043018/AM9180711355.DET',
-                  pressure_range=None)
-pm.add_detections(name='SM1',det_fn='2018_Data/SM1_20187013/050218/SM1180711252.DET',
-                  pressure_range=None)
-pm.add_detections(name='SM2',det_fn='2018_Data/SM2_20187014/050218/SM2180711257.DET',
-                  pressure_range=None)
-pm.add_detections(name='SM3',det_fn='2018_Data/SM3_20187015/SM3180711301.DET',
-                  pressure_range=None)
-pm.add_detections(name='SM4',det_fn='2018_Data/SM4_20187018/050218/SM6180711928.DET',
-                  pressure_range=None)
-pm.add_detections(name='SM8',det_fn='2018_Data/SM8_20187017/050218/SM5180711921.DET',
-                  pressure_range=None)
-pm.add_detections(name='SM9',det_fn='2018_Data/SM9_20187024/050218/SM12180721837.DET',
-                  pressure_range=None)
+    # 2018 data. no pressure data.
+    # Also no CF2 files?  are there any files that do give a beacon id?
+    # in DBG, NoiseAlpha=0xFFBE. probably not useful.
+    # AM2 should be FF08, based on hearing itself.
 
-pm.set_rx_locations(rx_locations_2018())
+    pm.add_detections(name='AM1',det_fn='2018_Data/AM1_20186009/050318/AM1180711347.DET',
+                      pressure_range=None)
+    pm.add_detections(name='AM2',det_fn='2018_Data/AM2_20186008/043018/AM2180711401.DET',
+                      pressure_range=None)
+    pm.add_detections(name='AM3',det_fn='2018_Data/AM3_20186006/043018/2018-6006180621239.DET',
+                      pressure_range=None)
+    pm.add_detections(name='AM4',det_fn='2018_Data/AM4_20186005/050118/2018-6005180671524.DET',
+                      pressure_range=None)
+    pm.add_detections(name='AM5',det_fn='2018_Data/AM5_20186004/050318/2018-6004180671635.DET',
+                      pressure_range=None)
+    pm.add_detections(name='AM8',det_fn='2018_Data/AM8_20186002/043018/2018-6002180401450.DET',
+                      pressure_range=None)
+    pm.add_detections(name='AM9',det_fn='2018_Data/AM9_20186001/043018/AM9180711355.DET',
+                      pressure_range=None)
+    pm.add_detections(name='SM1',det_fn='2018_Data/SM1_20187013/050218/SM1180711252.DET',
+                      pressure_range=None)
+    pm.add_detections(name='SM2',det_fn='2018_Data/SM2_20187014/050218/SM2180711257.DET',
+                      pressure_range=None)
+    pm.add_detections(name='SM3',det_fn='2018_Data/SM3_20187015/SM3180711301.DET',
+                      pressure_range=None)
+    pm.add_detections(name='SM4',det_fn='2018_Data/SM4_20187018/050218/SM6180711928.DET',
+                      pressure_range=None)
+    pm.add_detections(name='SM8',det_fn='2018_Data/SM8_20187017/050218/SM5180711921.DET',
+                      pressure_range=None)
+    pm.add_detections(name='SM9',det_fn='2018_Data/SM9_20187024/050218/SM12180721837.DET',
+                      pressure_range=None)
 
-# see notes in bayes_v02 on picking up clock resets
+    pm.set_rx_locations(rx_locations_2018())
 
-pm_nomp=pm.remove_multipath()
+    return pm
 
-pm_clip=pm_nomp.clip_time([np.datetime64("2018-03-20 20:00"),
-                           np.datetime64("2018-03-20 22:00")])
+if 0:
+    # see notes in bayes_v02 on picking up clock resets
 
-ds_total=pm_clip.match_all()
+    pm_nomp=pm.remove_multipath()
 
-##
+    pm_clip=pm_nomp.clip_time([np.datetime64("2018-03-20 20:00"),
+                               np.datetime64("2018-03-20 22:00")])
 
-fn=f'pings-{str(pm_clip.clipped[0])}_{str(pm_clip.clipped[1])}.nc'
-os.path.exists(fn) and os.unlink(fn)
-ds_total.to_netcdf(fn)
+    ds_total=pm_clip.match_all()
+
+    ##
+
+    fn=f'pings-{str(pm_clip.clipped[0])}_{str(pm_clip.clipped[1])}.nc'
+    os.path.exists(fn) and os.unlink(fn)
+    ds_total.to_netcdf(fn)
 
