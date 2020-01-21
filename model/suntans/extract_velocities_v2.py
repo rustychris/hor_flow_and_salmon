@@ -28,7 +28,9 @@ import numpy as np
 # with some quantization of about 30 seconds.
 # And what timezone is the model in? UTC.
 
-inp_fn="../../analysis/swimming/code/segments_m.csv"
+# 2020-01-21: change from segments_m.csv to segments.csv
+# per updated file from Ed.
+inp_fn="../../analysis/swimming/code/segments.csv"
 seg_dnum_to_utc=7./24 # add this to segment dnums to get utc.
 
 segments=pd.read_csv(inp_fn)
