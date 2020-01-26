@@ -5,20 +5,203 @@
 # Fit ping-by-ping with triplerx pings
 # see where things are.
 import seawater
+from scipy.special import erfc
+from stompy.spatial import linestring_utils
+
 import numpy as np
 import xarray as xr
 import prepare_pings as pp
+from stompy.plot import plot_utils
 from stompy import utils
+from stompy.spatial import field
+from scipy.optimize import fmin, brute
 from scipy.sparse.csgraph import shortest_path
 import matplotlib.pyplot as plt
+import pandas as pd
+from matplotlib import collections
+
+##
+img=field.GdalGrid("../../model/grid/boundaries/junction-bathy-rgb.tif")
+cleaned=pd.read_csv("../tags/cleaned_half meter.csv")
+
+##
+import pickle
+import pystan
+
+model_file='single_ping.stan'
+model_pkl=model_file+'.pkl'
+
+if False: # utils.is_stale(model_pkl,[model_file]):
+    sm = pystan.StanModel(file=model_file)
+    with open(model_pkl, 'wb') as fp:
+        pickle.dump(sm, fp)
+else:
+    with open(model_pkl,'rb') as fp:
+        sm=pickle.load(fp)
+
 ## 
+def cost2(xy,data):
+    rx_xy=np.c_[ data['rx_x'], data['rx_y']]
+    dists=utils.dist(xy - rx_xy)
+    transits=dists/data['rx_c']
+    d_transits=np.diff(transits)
+    d_times=np.diff(data['rx_t'])
+    
+    err=( (d_transits-d_times)**2 ).sum()
+    return err
+
+def solve_analytical(data):
+    """
+    Given a dictionary ready for passing to STAN
+    calculate pair of analytical solutions.
+    Expects data to have rx_x, rx_y, rx_t, and rx_c.
+    
+    Note that only the mean value of rx_c is used.
+
+    Based on the soln approach of Mathias et al 2008.
+    """
+    S=np.eye(3)
+    S[-1,-1]=-data['rx_c'].mean()**2
+
+    Nb=len(data['rx_x'])
+    
+    q_k=[np.array([data['rx_x'][k],
+                   data['rx_y'][k],
+                   data['rx_t'][k]])
+         for k in range(Nb)]
+
+    Qk=np.vstack(q_k)
+
+    QkS=Qk.dot(S)
+
+    arhs=[ q_i.T.dot(S).dot(q_i) for q_i in q_k]
+
+    invQks=np.linalg.pinv(QkS) # or pseudo-inverse
+
+    a=0.5*invQks.dot(arhs)
+    b=0.5*invQks.dot(np.ones_like(arhs))
+
+    # at this point q=a+v*b
+    # substitute back into definition of v
+    # to get coefficients of quadratic equation
+    C=a.dot(S).dot(a)
+    B=2*a.dot(S).dot(b)-1
+    A=b.dot(S).dot(b)
+    # Av^2 + B*v + C = 0
+    determ=B**2-4*A*C
+    if determ<0:
+        print("Determinant was negative")
+        return []
+    
+    v1=(-B+np.sqrt(determ))/(2*A)
+    v2=(-B-np.sqrt(determ))/(2*A)
+
+    # solutions:
+    q1=a+v1*b
+    q2=a+v2*b
+
+    rx_t_min=data['rx_t'].min()
+    
+    # Check times to make sure causality is preserved
+    q_valid=[ q for q in [q1,q2] if q[-1]<=rx_t_min]
+    # print(f"Analytical solution yielded {len(q_valid)} solutions")
+
+    return q_valid
+
+
+# Can stan resolve the multiple possible solutions?
+    
+def solve_tag_position(data):
+    #times,c,x,y,z):
+    #data=solver_data(times,c,x,y,z)
+
+    # First try to solve it analytically to get good starting points
+    solns=solve_analytical(data)
+
+    if len(solns)>0:
+        xy_solns=np.array(solns)[:,:-1] # drop times
+
+        polished=[]
+        for xy_soln in xy_solns:
+            opt=sm.optimizing(data=data,init=dict(x=xy_soln[0],y=xy_soln[1]))
+            polished.append( np.array([opt['x'],opt['y']]) )
+        xy_solns=np.array( polished )
+    else:
+        # if there were no analytical solutions, try just optimizing
+        opt=sm.optimizing(data=data)
+        xy_solns=np.array([ [opt['x'],opt['y']]])
+
+    # And for testing, just return those.
+    xy_solns+=data['xy0']
+    return xy_solns
+
+def data_to_hyperbola(data,a=0,b=1):
+    s=np.linspace(-5,5,100)
+
+    # Draw hyperbolas from data:
+    pa=np.r_[ data['rx_x'][a], data['rx_y'][a] ]
+    pb=np.r_[ data['rx_x'][b], data['rx_y'][b] ]
+
+    f0=0.5*(pa+pb)
+
+    dab=pb-pa
+    theta=np.arctan2(dab[1],dab[0]) # for the rotation
+    focus_dist=utils.dist(dab)
+
+    delta_ab=(data['rx_t'][b] - data['rx_t'][a])*0.5*(data['rx_c'][a]+data['rx_c'][b])
+
+    # well, I can get the eccentricity, right?
+    hyp_c=0.5*utils.dist(pa-pb) # center to one focus
+    # distance from a point to other focus
+    #         distance to this focus
+    # (c+a) - (c-a) = delta_ab
+    hyp_a=-delta_ab/2
+
+    ecc=hyp_c/hyp_a
+
+    # ecc = sqrt(1+b^2/a^2)
+    # ecc^2-1 = b^2/a^2
+    # take a^2=1
+    # b^2=ecc^2-1
+    # b=sqrt( ecc^2-1)
+    B=np.sqrt(ecc**2-1)
+
+    hxy_sim=np.c_[np.cosh(s),
+                  B*np.sinh(s)]
+    if 0:
+        hxy_sim_ref=np.c_[-np.cosh(s),
+                          B*np.sinh(s)]
+        # while working through this, include the reflection
+        hxy_sim=np.concatenate( [hxy_sim,
+                                 [[np.nan,np.nan]],
+                                 hxy_sim_ref])
+
+    # so a point on the hyperbola is at [1,0]
+    # and then the focus is at [ecc,0]
+
+    f1=np.array([ecc,0])
+    f2=-f1
+
+    deltas=utils.dist( hxy_sim-f1) - utils.dist(hxy_sim-f2)
+
+    # scale it - focus is current at ecc, and I want it at
+    # hyp_c
+    # hyp_c/ ecc =hyp_a
+    hxy_cong=hxy_sim * hyp_a
+
+    hxy_final=utils.rot(theta,hxy_cong) + f0 + data['xy0']
+
+    return hxy_final
+
+
+##
+
 # Looking through ~/src/hor_flow_and_salmon/analysis/swimming/plots-2019-06-28/plot_cleaned/
 fish_tag='7ADB' # decent track with some missing chunks
 
 ##
 
 # Read all the receivers to find out when this tag was seen
-
 pm=pp.ping_matcher_2018()
 
 ##
@@ -122,7 +305,11 @@ is_beacon=tx_beacon>=0
 
 temps=ds.temp.values
 
-rx_c=seawater.svel(0,ds['temp'],0) 
+# WHOA -- comparisons to the beacon-beacon transits suggest
+# that this has some significant error.  The inferred and
+# calculated speeds of sound are close-ish if temperature is
+# offset 4.5 degC.
+rx_c=seawater.svel(0,ds['temp']-4.5,0) 
 # occasional missing data...
 rx_c=utils.fill_invalid(rx_c,axis=1)
 
@@ -173,6 +360,45 @@ offset_mat=0.5*(delta_mat - delta_mat.transpose(0,2,1)) # antisymmetric
 transit_mat=0.5*(delta_mat + delta_mat.transpose(0,2,1)) # symmetric
 stale2_mat=stale_mat + stale_mat.transpose(0,2,1)
 
+
+## And get speed of sounds from here
+
+rx_rx_dists=np.zeros((Nrx,Nrx),np.float64)
+
+for a in range(Nrx):
+    xy_a=np.c_[ds.rx_x.values[a], ds.rx_y.values[a]]
+    for b in range(a,Nrx):
+        xy_b=np.c_[ds.rx_x.values[b], ds.rx_y.values[b]]
+        d=utils.dist(xy_a-xy_b)
+        rx_rx_dists[a,b]=d
+        rx_rx_dists[b,a]=d
+
+measured_c_mat=rx_rx_dists[None,:,:] / transit_mat
+
+##
+if 0:
+    # This is a bit troubling -- using just temperature,
+    # the median speed of sound is 1479 m/s
+    # but from the beacon-beacon tags, I get 1463 m/s
+
+    measured_c=measured_c_mat[ np.isfinite(measured_c_mat) ]
+
+    bins=np.linspace(1440,1490,200)
+
+    temp_valid=ds['temp'].values
+    temp_valid=temp_valid[ np.isfinite(temp_valid) ]
+
+    plt.figure(2).clf()
+    fig,axs=plt.subplots(2,1,num=2,sharex=True)
+
+    # including salinity shifts the distribution
+    # faster.  including pressure also makes it
+    # faster.
+    c_from_temp=seawater.svel(0,temp_valid-4.5,0) 
+
+    axs[0].hist(measured_c,bins=bins)
+    axs[1].hist(c_from_temp,bins=bins)
+
 ##
 
 # Just pick out the one tag I care about
@@ -183,9 +409,11 @@ ds_fish=ds_total.isel(index=is_triplerx & (ds_total.tag.values==fish_tag))
 matrix=ds_fish.matrix.values
 fish_tnums=ds_fish.tnum.values
 
-for i in range(ds_fish.dims['index']):
-    ping_tnum=fish_tnums[i]
-    ping_rx=matrix[i,:]
+fixes=[]
+
+def ping_to_solver_data(ping):
+    ping_tnum=ping.tnum.item() # fish_tnums[i]
+    ping_rx=ping.matrix.values # matrix[i,:]
 
     offset_idx=utils.nearest(mat_tnums,ping_tnum)
     fish_to_offset=np.abs(ping_tnum-mat_tnums[offset_idx])
@@ -230,427 +458,224 @@ for i in range(ds_fish.dims['index']):
         best_offsets[idxn]=offset_sum
 
     ping_rx_adj=(ping_rx - best_offsets) - ping_rx[idx0]
-    break
+
+    times=ping_rx_adj[rxs],
+    c=ping.c.isel(rx=rxs).values # ds_fish.c.isel(index=i,rx=rxs).values
+    x=ping.rx_x.isel(rx=rxs).values
+    y=ping.rx_y.isel(rx=rxs).values
+    z=ping.rx_z.isel(rx=rxs).values
+
+    time_scale=1000.
+    rx_xy=np.c_[x,y]
+    xy0=rx_xy.mean(axis=0)
+    rx_xy-=xy0
+    
+    data=dict(Nb=len(x),
+              xy0=xy0,
+              time_scale=time_scale,
+              rx_t=time_scale*ping_rx_adj[rxs],
+              rx_x=rx_xy[:,0],
+              rx_y=rx_xy[:,1],
+              sigma_t=0.1,
+              sigma_x=1000.0,
+              rx_c=c/time_scale)
+    return data
+    
+for i in range(ds_fish.dims['index']):
+    data=ping_to_solver_data(ds_fish.isel(index=i))
+
     # bundle up the time, speed of sound, and locations for the geometry solution
-    tag_location=solve_tag_position(times=ping_rx_adj[rxs],
-                                    c=ds_fish.c.isel(index=i,rx=rxs).values,
-                                    rx_x=ds_fish.rx_x.isel(rx=rxs).values,
-                                    rx_y=ds_fish.rx_y.isel(rx=rxs).values,
-                                    rx_z=ds_fish.rx_z.isel(rx=rxs).values)
-
-times=ping_rx_adj[rxs]
-c=ds_fish.c.isel(index=i,rx=rxs).values
-rx_x=ds_fish.rx_x.isel(rx=rxs).values
-rx_y=ds_fish.rx_y.isel(rx=rxs).values
-rx_z=ds_fish.rx_z.isel(rx=rxs).values
-# def solve_tag_position(times,c,x,y,z)
-
+    tag_locations=solve_tag_position(data)
+    for xy in tag_locations:
+        fixes.append(dict(x=xy[0],y=xy[1],i=i))
 ##
 
-rx_xy=np.c_[rx_x,rx_y]
-xy0=rx_xy.mean(axis=0)
-rx_xy-=xy0
-def cost(xyt):
-    xy=xyt[:2]
-    t=xyt[2]
-    
-    dists=utils.dist(xy - rx_xy)
-    transits=dists/c
-    dt=t-times
-    err=(dt**2).sum()
-    return err
+this_fish=cleaned[ cleaned.TagID==fish_tag.lower() ]
 
 ## 
-def cost2(xy,data):
-    rx_xy=np.c_[ data['rx_x'], data['rx_y']]
-    dists=utils.dist(xy - rx_xy)
-    transits=dists/data['rx_c']
-    d_transits=np.diff(transits)
-    d_times=np.diff(data['rx_t'])
-    
-    err=( (d_transits-d_times)**2 ).sum()
-    return err
-
-from scipy.optimize import fmin, brute
-
-
+all_fix=pd.DataFrame(fixes)
 ##
 
-x0,fval,grid,jout=brute(cost2,[(-200,200),(-200,200)],Ns=200,full_output=1)
-
-# How many local minima are there?
-# This doesn't work because the discretization leads to many
-# local minima.
-
-##
-ctr=jout[1:-1,1:-1]
-
-local_min=( (ctr<jout[0:-2,1:-1])
-            & (ctr<jout[2:,1:-1])
-            & (ctr<jout[1:-1,0:-2])
-            & (ctr<jout[1:-1,2:]) )
+# when there are two solutions, connect by a segment
+# This happens 36 times for 7ADB, out of 155 fixes.
+segs=[]
+def add_seg(grp):
+    if len(grp)>1:
+        segs.append(grp.loc[:, ['x','y']].values)
+all_fix.groupby('i').apply(add_seg)
+print(f"{len(segs)} locations have multiple solutions")
 
 ##
 
 plt.figure(1).clf()
 fig,ax=plt.subplots(1,1,num=1)
+scat=ax.scatter(all_fix.x,all_fix.y,12,color='g')
 ax.axis('equal')
-ax.pcolormesh( grid[1,0,:],
-               grid[0,:,0],
-               np.log(jout.T))
 
-ax.plot( rx_xy[:,0],rx_xy[:,1],'go')
-ax.plot( [x0[0]],[x0[1]],'ro')
+ax.plot( this_fish.X_UTM, this_fish.Y_UTM, 'k.')
 
-##
-# Currently not working...
-init=np.r_[ 0, 0, times.min() - np.std(times)]
-best_xyt=fmin(cost,init)
+img.plot(ax=ax,zorder=-5)
 
-# Maybe working.
-init2=np.r_[ 0, 0]
-best_xy=fmin(cost2,init2)
+ax.add_collection(collections.LineCollection(segs,color='g'))
+                  
+ax.axis('off')
+fig.tight_layout()
 
-##
-
-# 
-
-# # How about constructing the hyperbolas?
-# p0=rx_xy[0]
-# p1=rx_xy[1]
-# # how much later 0 saw recieved the ping
-# delta01=(times[0]-times[1])*0.5*(c[0]+c[1])
-# dist01=utils.dist(p0-p1)
-# norm01=utils.to_unit(p1-p0)
-# 
-# def hyp1(s):
-#     if delta01>dist01: # also should be a warning
-#         # points fall on a ray from p2
-#         return p2+norm01*s
-#     elif delta01<-dist01: # should be a warning
-#         # points fall on a ray from p1
-#         n=utils.to_unit(p1-p0)
-#         return p1-norm01*s
-#     else:
-#         # proper hyperbola
-#         p_mid=0.5*(p0+p1)
-#         # so if delta01 is positive, 0 saw the ping later,
-#         # so move the intercept towards
-#         p_int=p_mid*delta01/2*norm01
-#     
-
-
-##
-
-
-# import sympy
-# from sympy.solvers import solve
-# from sympy import Symbol,sqrt
-# 
-# # tag location
-# x=Symbol('x')
-# y=Symbol('y')
-# 
-# dists=[ sqrt( (rx_xy[i,0].round()-x)**2 + (rx_xy[i,1].round()-y)**2 )
-#         for i in range(rx_xy.shape[0]) ]
-# 
-# d01=(times[0] - times[1])*0.5*(c[0]+c[1])
-# d12=(times[1] - times[2])*0.5*(c[1]+c[2])
-# 
-# # What if I round those?
-# # In this specific case I get no answer, maybe because the ping is slightly too far
-# # away. If I round down, I get answers 
-# 
-# # Round deltas down
-# eqs=[dists[0] - dists[1] - (d01-0.5).round(),
-#      dists[1] - dists[2] - (d12-0.5).round()]
-# 
-# # This takes... 1 second with "nice" data.
-# # and fails to complete with the above data.
-# # is it possible that's because I upgraded sympy?
-# result=sympy.solve(eqs,[x,y])
-# print(result)
-# 
-# solns=np.array(result,dtype=np.float64)
-# ax.plot(solns[:,0],solns[:,1],'ko')
-
-##
-
-# In this case the solution is poor
-
-# is it sufficient to constrain the solutions to one half-plane
-# at a time (per time delta), in order to find all unique solutions?
-# not sure.
-# nope.  It's possible to have a pair of arms intersect in two locations.
-
-# Can stan resolve the multiple possible solutions?
-import pystan
-sm = pystan.StanModel(file='single_ping.stan')
-
-##
-time_scale=1000.
-rx_xy=np.c_[ ds_fish.rx_x.isel(rx=rxs).values,
-            ds_fish.rx_y.isel(rx=rxs).values]
-xy0=rx_xy.mean(axis=0)
-rx_xy-=xy0
-
-data=dict(Nb=3,
-          rx_t=time_scale*ping_rx_adj[rxs],
-          rx_x=rx_xy[:,0],
-          rx_y=rx_xy[:,1],
-          sigma_t=1.0,
-          rx_c=ds_fish.c.isel(index=i,rx=rxs).values/time_scale)
-
-opt=sm.optimizing(data=data) 
-
-##
-
-# Can I construct a case with two solutions?
-rx_xy=np.array( [ [0,10],
-                  [10,10],
-                  [10,0]], dtype=np.float64)
-data=dict(Nb=3,
-          rx_x=rx_xy[:,0],
-          rx_y=rx_xy[:,1],
-          sigma_t=1.0,
-          sigma_x=50.0,
-          rx_c=1.*np.ones(3))
-
-answer=np.array([12.,-1.])
-
-data['rx_t']=utils.dist(rx_xy-answer)/data['rx_c']
-## 
-x0,fval,grid,jout=brute(cost2,[(10,25),(-20,5)],Ns=200,full_output=1,
-                        args=(data,))
-opt=sm.optimizing(data=data) 
-
-##
-# This does terribly without sigma_x.
-# with sigma_x it at least converges, but not
-# very tightly.
-# additionally tighterning sigma_t 1.0 ==> 0.1 gives a good distribution.
-# sigma_t of 0.01:
-#  leads to getting stuck in the farther away distribtion
-#  providing the near solution as the initial, it gets stuck there.
-data['sigma_t']=0.05
-fit=sm.sampling(data=data,iter=10000,init=lambda: dict(x=answer[0],y=answer[1]))
-samples=fit.extract(['x','y'])
-
-## 
-plt.figure(1).clf()
-fig,axs=plt.subplots(1,2,num=1,sharex=True,sharey=True,subplot_kw=dict(adjustable='box'))
-ax,ax2=axs
-ax.set_aspect(1)
-coll=ax.pcolormesh( grid[0,:,0],
-                    grid[1,0,:],
-                    np.log10(jout.T))
-coll.set_clim([-4,-2])
-ax.plot( rx_xy[:,0],rx_xy[:,1],'go')
-ax.plot( [x0[0]],[x0[1]],'ro')
-
-ax.plot( [opt['x']],[opt['y']],'bo')
-
-# ax.plot(samples['x'],samples['y'],'k.')
-ax2.hist2d(samples['x'],samples['y'],bins=[np.linspace(10,25,80),
-                                           np.linspace(-20,5,80)])
-
-##
-
-# So the inference works, but its ability to find multiple solutions
-# is sensitive to sigma_t. Too small it will get stuck in the solution
-# with the largest basin. Too large and the solutions blend together
-# Simple constraints on which arm of the hyperbola to use do not
-# fix the issue, as a single pair of hyperbola arms can yield two solutions
-# (but not more than 2).
-# Is there another form of constraint that would isolate the solutions?
-# Possibly if I look at the arms of *all* pairs of hyperbola.
-
-# Should be able to do this just with a constrained minimization
-
-gx=np.linspace(-10,15,250)
-gy=np.linspace(-5,15,250)
-gX,gY=np.meshgrid(gx,gy)
-gXY=np.stack([gX,gY],0)
-
-
-fig_i=10
-
-all_arms=[ [1,1,1],
-           [1,1,-1],
-           [1,-1,1],
-           [1,-1,-1],
-           [-1,1,1],
-           [-1,1,-1],
-           [-1,-1,1],
-           [-1,-1,-1]]
-for arms in all_arms:
-    Arows=[]
-    lbs=[]
-    ubs=[]
-    eqs=[] # for finding an initial point
-
-    from scipy.optimize import LinearConstraint, minimize
-
-    arm_i=0
-    for a in range(data['Nb']):
-        for b in range(a+1,data['Nb']):
-            arm=arms[arm_i]
-            arm_i+=1
-
-            # calculate the equation of the line rx[a]-rx[b]
-            # dx+ey=1
-            mat=np.array( [[ data['rx_x'][a], data['rx_y'][a]],
-                           [ data['rx_x'][b], data['rx_y'][b]]] )
-            rhs=np.array([1,1])
-
-            d_e=np.linalg.solve(mat,rhs)
-            f=1.0
-            Arows.append( d_e )
-            if arm==1:
-                lbs.append(f)
-                ubs.append(np.inf)
-                eqs.append(f+0.1)
-            else:
-                lbs.append(-np.inf)
-                ubs.append(f)
-                eqs.append(f-0.1)
-
-    A=np.array(Arows)
-    lbs=np.array(lbs)
-    ubs=np.array(ubs)
-    eqs=np.array(eqs)
-
-    con=LinearConstraint(A,lbs,ubs)
-    # Have to come up with an initial point that satisfies the constraints
-    # candidates=rx_xy[:,:] # [N,2]
-
-    candidates=[]
-    for sel in [ [0,1],[0,2],[1,2]]:
-        x=np.linalg.solve(A[sel,:], eqs[sel])
-        candidates.append(x)
-    candidates=np.array(candidates)
-    mat_c=A.dot(candidates.T) # [constraint, candidate]
-    eps=1e-5
-    satisfy=np.all( (mat_c>=lbs[:,None]-eps) & (mat_c<=ubs[:,None]+eps), axis=0)
-    if not np.any(satisfy):
-        print(f"Arms: {arms}  no solution")
-        continue
-    candidates=candidates[satisfy]
-    cand_costs=[cost2(xy,data) for xy in candidates]
-    best=np.argmin(cand_costs)
-    x0=candidates[best] 
-
-    # meth='SLSQP'
-    meth="COBYLA"
-    optc=minimize(cost2,x0,method=meth,constraints=con,args=(data,))
-    if optc['fun']>1:
-        continue
-
-    txt=f"Arms: {arms}\nx: {optc['x']}\nfun: {optc['fun']:6f}"
-    print(txt)
-
-    # Plot that.
-    mat_c=np.tensordot( A, gXY,1)
-    sat_lb=mat_c>=lbs[:,None,None]
-    sat_ub=mat_c<=ubs[:,None,None]
-    sat=np.all(sat_lb&sat_ub,axis=0)
-
-    plt.figure(fig_i).clf()
-    fig,ax=plt.subplots(1,1,num=fig_i)
-    fig_i+=1
-    ax.pcolormesh(gXY[0,...],
-                  gXY[1,...],
-                  sat)
-    ax.axis('equal')
-    ax.plot( rx_xy[:,0],rx_xy[:,1],'go',label='rx')
-    ax.plot( [x0[0]],[x0[1]],'ro',label='x0')
-    ax.plot( [optc['x'][0]],[optc['x'][1]],'bo',label='opt')
-    ax.text(0.05,0.05,txt,transform=ax.transAxes,color='w')
-    ax.legend(loc='upper right')
-    ctrset=ax.contour( grid[0,:,0],
-                       grid[1,0,:],
-                       np.log10(jout.T))
-
-# This does come up with [12,-1]
-# exactly one no-solution.
-# but it fails to find the second solution.
-# the best it does is [13.51110626 -3.51110626]
-# That's still not it.
-
-# HERE - this should work better...
-# plot out the starting points
-# It fails because the starting point is closer to the
-# wrong minima.
-
-##
-
-def solve_analytical(data):
-    # Given a dictionary ready for passing to STAN
-    # calculate pair of analytical solutions
-
-    # Based on the soln approach of Mathias et al 2008.
-    S=np.eye(3)
-    S[-1,-1]=-data['rx_c'].mean()**2
-
-    q_k=[np.array([data['rx_x'][k],
-                   data['rx_y'][k],
-                   data['rx_t'][k]])
-         for k in range(3)]
-
-    Qk=np.vstack(q_k)
-
-    QkS=Qk.dot(S)
-
-    arhs=[ q_i.T.dot(S).dot(q_i) for q_i in q_k]
-
-    invQks=np.linalg.inv(QkS) # or pseudo-inverse
-
-    a=0.5*invQks.dot(arhs)
-    b=0.5*invQks.dot(np.ones_like(arhs))
-
-    # at this point q=a+v*b
-    # substitute back into definition of v
-    # to get coefficients of quadratic equation
-    C=a.dot(S).dot(a)
-    B=2*a.dot(S).dot(b)-1
-    A=b.dot(S).dot(b)
-    # Av^2 + B*v + C = 0
-    v1=(-B+np.sqrt(B**2-4*A*C))/(2*A)
-    v2=(-B-np.sqrt(B**2-4*A*C))/(2*A)
-
-    # solutions:
-    q1=a+v1*b
-    q2=a+v2*b
-
-    rx_t_min=data['rx_t'].min()
+def pick_idx(idx,**kws):
+    print(idx)
+    print(kws)
     
-    # Check times to make sure causality is preserved
-    q_valid=[ q for q in [q1,q2] if q[-1]<=rx_t_min]
+plot_utils.enable_picker(scat,ax=ax,cb=pick_idx)
+# results at this point are similar but visually not quite as good
+# as the original.
+# could try pulling c from the clock drift calcs.  no real help.
+# could also introduce z, or some allowance for z.
 
-    return q_valid
+##
+
+# Plot details for a specific location
+idx=89 # index into all_fix.
+
+plt.figure(2).clf()
+fig,ax=plt.subplots(1,1,num=2)
+
+frame_points=[]
+
+fix_x=all_fix.x[idx]
+fix_y=all_fix.y[idx]
+fix_i=all_fix.i[idx]
+scat=ax.scatter([fix_x],[fix_y],
+                12,color='g')
+ax.axis('equal')
+
+frame_points.append( [fix_x,fix_y] )
+
+# Show the previous 2 and next 2 locations
+bracket_i=range(fix_i-2,fix_i+3)
+bracket_fixes=all_fix[ all_fix.i.isin(bracket_i) ]
+ax.scatter( bracket_fixes.x, bracket_fixes.y, 30,bracket_fixes.i,
+            cmap='seismic')
+
+img.plot(ax=ax,zorder=-5)
+                  
+ax.axis('off')
+fig.tight_layout()
+
+ds_one=ds_fish.isel(index=all_fix.i[idx])
+mat=ds_one.matrix.values
+
+rx_segs=[]
+rx_xy=np.c_[ ds_one.rx_x.values, ds_one.rx_y.values]
+
+for rx in range(ds_one.dims['rx']):
+    if np.isfinite(mat[rx]):
+        rx_segs.append( np.array( [ [fix_x,fix_y],
+                                    rx_xy[rx]] ) )
+        frame_points.append(rx_xy[rx])
+ax.add_collection(collections.LineCollection(rx_segs,color='b'))
+
+# Fit a cloud
+data=ping_to_solver_data(ds_one)
+
+# There is something about the tdoa approach that tends to push points
+# away.  
+data['sigma_t']=0.1
+data['sigma_x']=5 # This has to be reeled in quite a bit to get a decent fit.
+
+if 0: # fit model in stan sampling
+    fit=sm.sampling(data=data,iter=10000,init=lambda: dict(x=fix_x,y=fix_y))
+    samples=fit.extract(['x','y'])
+    sample_x=samples['x']+data['xy0'][0]
+    sample_y=samples['y']+data['xy0'][1]
+    ax.plot(sample_x,sample_y,
+             'k.',ms=2,alpha=0.1,zorder=5)
+
+if 1: # draw samples for the time error, generate analytical solutions
+    soln_samples=[]
+    for i in range(1000):
+        data_sample=dict(data)
+        rx_t=data['rx_t'].copy()
+        err_dt=np.random.normal(loc=0,scale=data['sigma_t'],size=rx_t.shape)
+        data_sample['rx_t']=rx_t+err_dt
+        solns=solve_analytical(data_sample)
+        soln_samples+=solns
+    soln_samples=np.array(soln_samples)
+    soln_samples[:,:2]+= data['xy0']
+    ax.plot(soln_samples[:,0],soln_samples[:,1],'k.',ms=2,alpha=0.1,zorder=5)
     
+frame_points=np.array(frame_points)
 
-## 
-plt.figure(1).clf()
-fig,axs=plt.subplots(1,2,num=1,sharex=True,sharey=True,subplot_kw=dict(adjustable='box'))
-ax,ax2=axs
-ax.set_aspect(1)
-coll=ax.pcolormesh( grid[0,:,0],
-                    grid[1,0,:],
-                    np.log10(jout.T))
-coll.set_clim([-4,-2])
-ax.plot( rx_xy[:,0],rx_xy[:,1],'go')
-ax.plot( [x0[0]],[x0[1]],'ro')
+ax.axis( xmin=frame_points[:,0].min()-10,
+         xmax=frame_points[:,0].max()+10,
+         ymin=frame_points[:,1].min()-10,
+         ymax=frame_points[:,1].max()+10)
 
-ax.plot( [opt['x']],[opt['y']],'bo')
+for a in range(data['Nb']-1):
+    for b in range(a+1,data['Nb']):
+        hyp_xy=data_to_hyperbola(data,a,b)
+        ax.plot(hyp_xy[:,0],hyp_xy[:,1],'g-')
 
-# ax.plot(samples['x'],samples['y'],'k.')
-ax2.hist2d(samples['x'],samples['y'],bins=[np.linspace(10,25,80),
-                                           np.linspace(-20,5,80)])
+        
+ax.axis( (647058.3994284421, 647621.3325907472, 4185762.540660423, 4186099.105212007) )
 
-qi=np.vstack( [q1,q2] )
-ax.plot(qi[:,0],
-        qi[:,1],
-        'ro')
+##
 
-# BUENO!
+# How to account for the fact that as you move out on the arms of the
+# hyperbola, the same error distance perpendicular to the curve
+# has a smaller effect on the error in the delta.
+
+s=np.linspace(-3,3,501)
+
+ecc=2*np.sqrt(2) # 2*np.sqrt(2) # c/a
+B=np.sqrt(ecc**2-1)
+
+hyp=np.c_[ np.cosh(s), B*np.sinh(s) ]
+lefts=linestring_utils.left_normals(hyp)
+
+dx=0.05
+hyp_err=hyp+dx*lefts
+
+plt.figure(2).clf()
+fig,(ax,ax_l)=plt.subplots(1,2,num=2)
+
+#ax.plot(hyp[:,0],hyp[:,1],'k-')
+#ax.plot(hyp_err[:,0],hyp_err[:,1],'r-')
+
+a=1
+c=ecc*a # np.sqrt(2) for unit
+f1=np.array([c,0])
+f2=-f1
+
+foci=np.array([f1,f2])
+ax.plot(foci[:,0],foci[:,1],'ko')
+
+ax.axis('equal')
+
+nominal=utils.dist(hyp - f2) - utils.dist(hyp-f1)
+perturb=utils.dist(hyp_err - f2) - utils.dist(hyp_err-f1)
+err=nominal-perturb
+
+scat=ax.scatter(hyp_err[:,0],hyp_err[:,1],20,err,cmap='jet')
+plt.colorbar(scat,label="TDOA Error",ax=ax)
+l_x=utils.dist(hyp)/a
+# This normalizes the error to [0,1]
+ax_l.plot(l_x,err/(2*dx),label='Error',lw=8,alpha=0.3)
+ax_l.set_xlabel('Dist to center / 2*c')
+ax_l.set_ylabel('TDOA error sensitivity')
+
+# Too severe
+#ax_l.plot(l_x,np.exp( -l_x+1 ),label='Fit')
+#ax_l.plot(l_x,erfc( (l_x-1)/5 ) ,label='Fit')
+
+# There it is-- this looks perfect for the unit hyperbola
+ax_l.plot(l_x,1./l_x ,label='Fit')
+# ax_l.plot(1+(l_x-1)*2.8,1./l_x,label='Fit -- ecc')
+
+ax_l.plot(1+ecc**2*(l_x-1)/2,
+          1/l_x,
+          label='Fit -- ecc')
+
+ax_l.legend(loc='upper right')
+fig.tight_layout()
+
+# Hmm - so would have to work that out...
