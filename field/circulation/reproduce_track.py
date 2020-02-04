@@ -25,6 +25,10 @@ img=field.GdalGrid("../../model/grid/boundaries/junction-bathy-rgb.tif")
 cleaned=pd.read_csv("../tags/cleaned_half meter.csv")
 
 ##
+
+dem=field.GdalGrid("../../bathy/junction-composite-dem-no_adcp.tif")
+
+##
 import pickle
 import pystan
 
@@ -121,11 +125,11 @@ def solve_tag_position(data):
     if len(solns)>0:
         xy_solns=np.array(solns)[:,:-1] # drop times
 
-        polished=[]
-        for xy_soln in xy_solns:
-            opt=sm.optimizing(data=data,init=dict(x=xy_soln[0],y=xy_soln[1]))
-            polished.append( np.array([opt['x'],opt['y']]) )
-        xy_solns=np.array( polished )
+        # polished=[]
+        # for xy_soln in xy_solns:
+        #     opt=sm.optimizing(data=data,init=dict(x=xy_soln[0],y=xy_soln[1]))
+        #     polished.append( np.array([opt['x'],opt['y']]) )
+        # xy_solns=np.array( polished )
     else:
         # if there were no analytical solutions, try just optimizing
         opt=sm.optimizing(data=data)
@@ -480,36 +484,85 @@ def ping_to_solver_data(ping):
               sigma_x=1000.0,
               rx_c=c/time_scale)
     return data
-    
-for i in range(ds_fish.dims['index']):
-    data=ping_to_solver_data(ds_fish.isel(index=i))
 
-    # bundle up the time, speed of sound, and locations for the geometry solution
-    tag_locations=solve_tag_position(data)
-    for xy in tag_locations:
-        fixes.append(dict(x=xy[0],y=xy[1],i=i))
+def fish_add_fixes(ds_fish):
+    """
+    Given the rx data for a specific tag, add fixes for each
+    ping where possible
+    """
+    ds_fish=ds_fish.copy()
+    
+    for i in range(ds_fish.dims['index']):
+        data=ping_to_solver_data(ds_fish.isel(index=i))
+
+        # bundle up the time, speed of sound, and locations for the geometry solution
+        tag_locations=solve_tag_position(data)
+        for xy in tag_locations:
+            fixes.append(dict(x=xy[0],y=xy[1],i=i))
+    
+    all_fix=pd.DataFrame(fixes)
+    ds_fish['fix_idx']=('fix',),all_fix.i
+    ds_fish['fix_x']=('fix',),all_fix.x
+    ds_fish['fix_y']=('fix',),all_fix.y
+    
+    return ds_fish
+
+fish2=fish_add_fixes(ds_fish)
+
+## 
+def filter_fixes_by_dem(fish,dem,z_max=2.0):
+    fish_xy=np.c_[ fish2.fix_x.values, fish2.fix_y.values]
+    z=dem(fish_xy)
+    invalid=np.isnan(z) | (z>z_max)
+    fish=fish.isel(fix=~invalid)
+    return fish
+
+fish3=filter_fixes_by_dem(fish2,dem,2.0)
+
+##
+max_speed=5.0
+
+def filter_fixes_by_speed(fish,max_speed=5.0):
+    # pre-allocate, in case there are indices that
+    # have no fixes.
+    posns=[ [] ]*fish.dims['index']
+    fix_xy=np.c_[ fish.fix_x.values,
+                  fish.fix_y.values ]
+    for key,grp in utils.enumerate_groups(fish.fix_idx.values):
+        posns[key].append(fix_xy[grp])
+
+    for idx in range(fish.dims['index']):
+        if len(posns[idx])<2: continue # only filtering out multi-fixes
+        
+        for pxy in posns[idx]:
+            for pxy_previous in posns[idx-1]:
+                dist=utils.dist(pxy-pxy_previous)
+                dt=HERE - but use YAPS instead
+
 ##
 
 this_fish=cleaned[ cleaned.TagID==fish_tag.lower() ]
 
-## 
-all_fix=pd.DataFrame(fixes)
 ##
 
 # when there are two solutions, connect by a segment
 # This happens 36 times for 7ADB, out of 155 fixes.
+
 segs=[]
-def add_seg(grp):
-    if len(grp)>1:
-        segs.append(grp.loc[:, ['x','y']].values)
-all_fix.groupby('i').apply(add_seg)
+fix_xy=np.c_[ fish3.fix_x.values,
+              fish3.fix_y.values ]
+
+for key,grp in utils.enumerate_groups(fish3.fix_idx.values):
+    if len(grp)==1: continue
+    segs.append( fix_xy[grp,:] )
+
 print(f"{len(segs)} locations have multiple solutions")
 
 ##
 
 plt.figure(1).clf()
 fig,ax=plt.subplots(1,1,num=1)
-scat=ax.scatter(all_fix.x,all_fix.y,12,color='g')
+scat=ax.scatter(fix_xy[:,0],fix_xy[:,1],12,color='g')
 ax.axis('equal')
 
 ax.plot( this_fish.X_UTM, this_fish.Y_UTM, 'k.')
@@ -534,7 +587,7 @@ plot_utils.enable_picker(scat,ax=ax,cb=pick_idx)
 ##
 
 # Plot details for a specific location
-idx=89 # index into all_fix.
+idx=46 # index into all_fix.
 
 plt.figure(2).clf()
 fig,ax=plt.subplots(1,1,num=2)
@@ -592,17 +645,29 @@ if 0: # fit model in stan sampling
 
 if 1: # draw samples for the time error, generate analytical solutions
     soln_samples=[]
-    for i in range(1000):
+    for i in range(50000):
         data_sample=dict(data)
         rx_t=data['rx_t'].copy()
-        err_dt=np.random.normal(loc=0,scale=data['sigma_t'],size=rx_t.shape)
+        # Baseline error -- normally distributed noise
+        err_dt=np.random.normal(loc=0,scale=3*data['sigma_t'],size=rx_t.shape)
+        
         data_sample['rx_t']=rx_t+err_dt
         solns=solve_analytical(data_sample)
         soln_samples+=solns
+        if len(soln_samples)>=1000:
+            break
     soln_samples=np.array(soln_samples)
-    soln_samples[:,:2]+= data['xy0']
-    ax.plot(soln_samples[:,0],soln_samples[:,1],'k.',ms=2,alpha=0.1,zorder=5)
-    
+    if len(soln_samples):
+        soln_samples[:,:2]+= data['xy0']
+        ax.plot(soln_samples[:,0],soln_samples[:,1],'k.',ms=2,alpha=0.1,zorder=5)
+
+        xmed=np.median(soln_samples[:,0])
+        ymed=np.median(soln_samples[:,1])
+        ax.plot([xmed],[ymed],'k.',ms=6,zorder=5)
+        
+    else:
+        print("NO VALID SAMPLES")
+        
 frame_points=np.array(frame_points)
 
 ax.axis( xmin=frame_points[:,0].min()-10,
@@ -620,62 +685,35 @@ ax.axis( (647058.3994284421, 647621.3325907472, 4185762.540660423, 4186099.10521
 
 ##
 
-# How to account for the fact that as you move out on the arms of the
-# hyperbola, the same error distance perpendicular to the curve
-# has a smaller effect on the error in the delta.
+# So it's fairly straightforward to take sampled
+# time errors and generate locations.
+# those locations
 
-s=np.linspace(-3,3,501)
+# idx=46 is suspicious: 4 receivers, and it fails to get a solution.
+# maybe some multipath?  I can increase the noise and get some solutions.
+# A naive approach to multipath didn't work (including extra error
+# 1% of the time).  Something less ad-hoc might, though.
 
-ecc=2*np.sqrt(2) # 2*np.sqrt(2) # c/a
-B=np.sqrt(ecc**2-1)
+# There are definitely times that I get two solutions and teknologic
+# is reporting the worse of the two.  Not super often.
 
-hyp=np.c_[ np.cosh(s), B*np.sinh(s) ]
-lefts=linestring_utils.left_normals(hyp)
 
-dx=0.05
-hyp_err=hyp+dx*lefts
+# Possible avenues forward:
+#   1. Just use their data, work on behavior
+#   2. Add some heuristics to choose solutions
+#      a. discount solutions requiring long transit
+#      b. discount solutions far from previous/next solutions.
+#      c. discount solutions on land.
+#   3. Fit sequences of samples
+#      a. more robust options for dealing with sample-sample distance.
+#      b. options for including estimated ping time, both to correct
+#         3-rx solutions and to get estimates for 2-rx solutions
 
-plt.figure(2).clf()
-fig,(ax,ax_l)=plt.subplots(1,2,num=2)
 
-#ax.plot(hyp[:,0],hyp[:,1],'k-')
-#ax.plot(hyp_err[:,0],hyp_err[:,1],'r-')
+# Potential plan of attach:
+#  Try the steps in (2), to get a cloud of potential solutions
+#  Those solutions include ping times.
+#  Fit a mean and sigma to the time between pings.
+#  [could refit the solutions based on ping-ping times?]
+#  Fit clouds to 2-ping solutions using that uncertainty in ping times.
 
-a=1
-c=ecc*a # np.sqrt(2) for unit
-f1=np.array([c,0])
-f2=-f1
-
-foci=np.array([f1,f2])
-ax.plot(foci[:,0],foci[:,1],'ko')
-
-ax.axis('equal')
-
-nominal=utils.dist(hyp - f2) - utils.dist(hyp-f1)
-perturb=utils.dist(hyp_err - f2) - utils.dist(hyp_err-f1)
-err=nominal-perturb
-
-scat=ax.scatter(hyp_err[:,0],hyp_err[:,1],20,err,cmap='jet')
-plt.colorbar(scat,label="TDOA Error",ax=ax)
-l_x=utils.dist(hyp)/a
-# This normalizes the error to [0,1]
-ax_l.plot(l_x,err/(2*dx),label='Error',lw=8,alpha=0.3)
-ax_l.set_xlabel('Dist to center / 2*c')
-ax_l.set_ylabel('TDOA error sensitivity')
-
-# Too severe
-#ax_l.plot(l_x,np.exp( -l_x+1 ),label='Fit')
-#ax_l.plot(l_x,erfc( (l_x-1)/5 ) ,label='Fit')
-
-# There it is-- this looks perfect for the unit hyperbola
-ax_l.plot(l_x,1./l_x ,label='Fit')
-# ax_l.plot(1+(l_x-1)*2.8,1./l_x,label='Fit -- ecc')
-
-ax_l.plot(1+ecc**2*(l_x-1)/2,
-          1/l_x,
-          label='Fit -- ecc')
-
-ax_l.legend(loc='upper right')
-fig.tight_layout()
-
-# Hmm - so would have to work that out...
