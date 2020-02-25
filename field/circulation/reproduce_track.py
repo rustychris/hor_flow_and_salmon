@@ -223,7 +223,8 @@ t_max=np.max(t_maxs)
 print(f"Time range for tag {fish_tag}: {t_min} -- {t_max}")
 
 # Add some padding before/after to help with getting good clock sync
-pad=np.timedelta64(1800,'s')
+# pad=np.timedelta64(1800,'s')
+pad=np.timedelta64(4*3600,'s') # beef up the pad to try to improve syncmodel in yaps
 
 t_start=t_min-pad
 t_stop =t_max+pad
