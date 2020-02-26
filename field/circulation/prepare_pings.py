@@ -511,7 +511,7 @@ def merge_detections(ds_a,ds_b,matches):
 class PingMatcher(object):
     T0=None # set to a datetime64 around the time of the field data
     max_shift=20 # seconds
-    max_drift=0.005 # seconds/seconds
+    max_drift=0.005 # seconds/second
     max_delta=0.500 # seconds
     max_bad_pings=10
     verbose=False
@@ -526,8 +526,12 @@ class PingMatcher(object):
     def add_detections(self,name,det_fn,**kw):
         detects=pt.parse_tek(det_fn,name=name,**kw)
         if isinstance(detects,list):
-            self.all_detects.extend(detects)
+            for i,d in enumerate(detects):
+                d['station']=d['name']
+                d['name']=(),d['name'].item()+'.%d'%i
+                self.all_detects.append(d)
         else:
+            detects['station']=detects['name']
             self.all_detects.append(detects)
     def copy(self):
         pm=PingMatcher()
@@ -693,6 +697,7 @@ class PingMatcher(object):
         for idx_a in idxs[1:]:
             print(f"Adding idx {idx_a} into the mix")
             ds_a=detects[idx_a]
+            if len(ds_a.index)==0: continue # probably nixed during clip_time()
             tags_b=self.tag_to_num(ds_b.tag.values)
             tags_a=self.tag_to_num(ds_a.tag.values)
 
@@ -714,6 +719,60 @@ class PingMatcher(object):
 
         return ds_b
 
+    def match_all_by_similarity(self):
+        """
+        Similar to match_all(), but process the groups in order of best 
+        potential match. In some cases this is more successful than match_all().
+        match_all() uses the given order of receivers. 
+        For example, with receivers [A,B,C], it may be the case that 
+        A-B is poorly constrained, but A-C and B-C are constrained.  match_all()
+        may get A-B wrong, which then sinks the rest of the matching.
+        The approach here evaluates each pair in terms of the maximum possible 
+        number of matches, and matches the pair with the greatest possible
+        number of matches first.  This is repeated iteratively until no
+        more potential matches are possible.
+
+        detects: list of xr.Dataset, each one giving the time and tags from a single
+        receiver.
+
+        returns a merged dataset matching up as many of the pings as possible.
+        """
+        self.prepare()
+        beacon_tags=np.unique([ds.beacon_id.item() for ds in self.all_detects])
+        
+        dss=self.all_detects
+
+        while len(dss)>1:
+            Ndet=len(dss)
+            # similarities=np.zeros((Ndet,Ndet), np.int32)
+
+            tag_counts=[ [ (ds.tag.values==b).sum() for b in beacon_tags ]
+                         for ds in dss ]
+
+            best_match=[0,None]
+            for ds_ai in range(Ndet):
+                for ds_bi in range(ds_ai+1,Ndet):
+                    a_tag_counts=tag_counts[ds_ai]
+                    b_tag_counts=tag_counts[ds_bi]
+                    # calculate a max possible number of matches
+                    ab_tag_counts=[ min(a,b) for a,b in zip(a_tag_counts,b_tag_counts)]
+                    sim=np.sum(ab_tag_counts)
+                    if sim>best_match[0]:
+                        best_match=[sim,(ds_ai,ds_bi)]
+                    # similarities[ds_ai,ds_bi]=sim
+            if best_match[0]==0:
+                break
+            ai,bi=best_match[1]
+            print(f"Will match ai={ai} bi={bi} with best possible length of {best_match[0]}")
+            ab=self.match_sequences(dss[ai], dss[bi])
+            dss=dss[:ai] + dss[ai+1:bi] + dss[bi+1:]
+            dss.append(ab)
+            
+        ds_result=dss[-1]
+        self.add_beacon_list(ds_result)    
+
+        return ds_result
+    
     def set_rx_locations(self,df):
         """
         Save UTM coordinate info.  df should be indexed
@@ -721,7 +780,7 @@ class PingMatcher(object):
         """
         self.rx_locs=df
         for d in self.all_detects:
-            name=d.name.item()
+            name=d.station.item()
             if name in self.rx_locs.index:
                 x,y,z=self.rx_locs.loc[name,['x','y','z']].values
             else:
