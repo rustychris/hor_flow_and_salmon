@@ -518,6 +518,13 @@ class PingMatcher(object):
     max_matches=1 # stop when this many potential sets of matches are found
 
     clipped=None
+
+    # Originally, when searching for bad pings, the assumption was that only
+    # one dataset or the other had bad pings.  The relatively low rate of
+    # bad pings allowed this.  But in processing all of the 2018 data,
+    # it appears that at least on occasion, during a 6 hour window, both datasets
+    # can have some bad pings
+    allow_dual_bad_pings=False
     
     def __init__(self,**kw):
         utils.set_keywords(self,kw)
@@ -537,6 +544,7 @@ class PingMatcher(object):
         pm=PingMatcher()
         pm.all_detects=self.all_detects
         pm.T0=self.T0
+        pm.allow_dual_bad_pings=self.allow_dual_bad_pings
         return pm
     
     def remove_multipath(self):
@@ -625,11 +633,11 @@ class PingMatcher(object):
 
                 if longest_fail is not None:
                     print("Longest fail: ", longest_fail)
-                    if not bad_b:
+                    if (not bad_b) or (self.allow_dual_bad_pings):
                         for a in longest_fail[0]:
                             next_bad_a=a_slc_idx[a]
                             bad_apple_search.append( (bad_a+[next_bad_a], bad_b) )
-                    if not bad_a:
+                    if (not bad_a) or (self.allow_dual_bad_pings):
                         for b in longest_fail[1]:
                             next_bad_b=b_slc_idx[b]
                             bad_apple_search.append( (bad_a, bad_b+[next_bad_b]) )
@@ -735,16 +743,21 @@ class PingMatcher(object):
         detects: list of xr.Dataset, each one giving the time and tags from a single
         receiver.
 
-        returns a merged dataset matching up as many of the pings as possible.
+        returns a merged dataset matching up as many of the pings as possible, or None
+          in the case that there are no possible beacon tag alignments. That will
+          happen when no receiver hear another receiver.  Note that this ignores
+          non-beacon tags that might be heard by multiple receivers and allow a coarse
+          clock alignment (ignored because most likely there won't enough data to 
+          complete trilateration)
         """
         self.prepare()
         beacon_tags=np.unique([ds.beacon_id.item() for ds in self.all_detects])
-        
-        dss=self.all_detects
+
+        # Filter down to rx that actually have some pings
+        dss=[ds for ds in self.all_detects if ds.dims['index']]
 
         while len(dss)>1:
             Ndet=len(dss)
-            # similarities=np.zeros((Ndet,Ndet), np.int32)
 
             tag_counts=[ [ (ds.tag.values==b).sum() for b in beacon_tags ]
                          for ds in dss ]
@@ -752,6 +765,23 @@ class PingMatcher(object):
             best_match=[0,None]
             for ds_ai in range(Ndet):
                 for ds_bi in range(ds_ai+1,Ndet):
+                    # dss can contain sequential instances of the same stations,
+                    # before/after a clock reset.  Would like to ignore cases where station
+                    # is the same.  Not that simple.  Only the original datasets
+                    # have station.
+                    # If it's not ignored here, then we risk match_sequences failing
+                    # below, and then we won't know how to proceed.
+                    # Instead, ignore cases where the times do not significantly overlap.
+                    # Still not great...
+                    common_start=max(dss[ds_ai].tnum.values[0], dss[ds_bi].tnum.values[0])
+                    common_end = min(dss[ds_ai].tnum.values[-1],dss[ds_bi].tnum.values[-1])
+                    t_overlap=common_end-common_start
+                    # don't process if less than 10 minutes. Note that big clock shifts
+                    # like an hour will screw this up, but none of this process can deal
+                    # with errors that large.
+                    if t_overlap<600.0: 
+                        continue
+                    
                     a_tag_counts=tag_counts[ds_ai]
                     b_tag_counts=tag_counts[ds_bi]
                     # calculate a max possible number of matches
@@ -759,7 +789,6 @@ class PingMatcher(object):
                     sim=np.sum(ab_tag_counts)
                     if sim>best_match[0]:
                         best_match=[sim,(ds_ai,ds_bi)]
-                    # similarities[ds_ai,ds_bi]=sim
             if best_match[0]==0:
                 break
             ai,bi=best_match[1]
@@ -767,11 +796,20 @@ class PingMatcher(object):
             ab=self.match_sequences(dss[ai], dss[bi])
             dss=dss[:ai] + dss[ai+1:bi] + dss[bi+1:]
             dss.append(ab)
-            
-        ds_result=dss[-1]
-        self.add_beacon_list(ds_result)    
 
-        return ds_result
+        # Scan the remaining datasets, and hope that exactly one has merged results.
+        merged_dss=[ds for ds in dss if ds.dims.get('rx',0)>0 ]
+        if len(merged_dss)==0:
+            return None
+        elif len(merged_dss)>1:
+            # Probably an indication of a bug.  It *could* be real, in which case
+            # the easiest solution is to return the one with the most total pings,
+            # but that would discard the information in the other connected components.
+            raise Exception("Multiple connected components of rx.  Not ready for that")
+        else:
+            ds_result=merged_dss[0]
+            self.add_beacon_list(ds_result)    
+            return ds_result
     
     def set_rx_locations(self,df):
         """

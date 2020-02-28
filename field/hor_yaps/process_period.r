@@ -10,7 +10,6 @@ crs(dem) <- '+proj=utm +zone=10 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no
 dem_slope <- terrain(dem, opt='slope')
 dem_aspect <- terrain(dem, opt='aspect')
 hill <- hillShade(dem_slope, dem_aspect, 40, 270)
-plot(hill, col=grey(0:100/100), legend=FALSE)
 
 
 plotYapsEllipses <- function(inp,yaps_out){
@@ -48,7 +47,12 @@ plotYapsEllipses <- function(inp,yaps_out){
 # Failed to sync when all hydros fixed.
 #period_dir="../circulation/yaps/20180318T0000-20180318T0300"
 # mostly good, but 7D49 is wacky.
-period_dir="../circulation/yaps/20180318T0000-20180318T0600"
+# period_dir="../circulation/yaps/20180318T0000-20180318T0600"
+# Just trying some other random period:
+# period_dir="../circulation/yaps/20180314T1500-20180314T2100" # failed to clock sync
+# period_dir="../circulation/yaps/20180327T1100-20180327T1700" # failed to clock sync
+period_dir="../circulation/yaps/20180328T1900-20180329T0100" # fails to clock sync
+# period_dir="../circulation/yaps/20180401T2300-20180402T0500"
 
 # careful parsing missing sync_tag here
 # also, any sync_tag that is not received by at least 3 rxs (self+2)  
@@ -60,15 +64,49 @@ beacon2018<-c()
 beacon2018$hydros <- hydros
 beacon2018$detections <- all_detections
 
-inp_sync <- getInpSync(sync_dat=beacon2018, max_epo_diff = 10,
-                       min_hydros = 2,
-                       time_keeper_idx = 2,
-                       fixed_hydros_idx = c(1:3),
-                       n_offset_day = 4,
+inp_sync <- getInpSync(sync_dat=beacon2018, 
+                       max_epo_diff = 10,
+                       min_hydros = 3, 
+                       time_keeper_idx = 5, # was 2. changing this did help.
+                       fixed_hydros_idx = c(4:5), # maybe need to avoid SM9, which has no sync tag?
+                       n_offset_day = 2, # was 4
                        n_ss_day = 2)
 
-# This seems to be working -- a few outliers, but generally O(0.1m) residuals.
 sync_model <- getSyncModel(inp_sync,silent=FALSE)
+
+# # okay - why can I not get any of the new datasets to line up?
+# # Try peaking inside getSyncModel
+# silent<-FALSE
+# fine_tune<-TRUE
+# 
+# dat_tmb <- inp_sync$dat_tmb_sync
+# params <- inp_sync$params_tmb_sync
+# random <- inp_sync$random_tmb_sync
+# inits <- inp_sync$inits_tmb_sync
+# inp_params <- inp_sync$inp_params
+#   
+# opt <- c()
+# pl <- c()
+# plsd <- c()
+# obj <- c()
+# sync_done <- FALSE
+# i <- 1
+# #while(!sync_done){
+#     tictoc::tic(paste0("... iteration ", i))
+#     obj <- c()
+#     opt <- c()
+#     report <- c()
+#     gc()
+#     
+#     # config(DLL="yaps_sync")
+#     # ## Reduce memory peak of a parallel model by creating tapes in serial
+#     # config(tape.parallel=0, DLL="yaps_sync")
+#     obj <- TMB::MakeADFun(data = dat_tmb, parameters = params, random = random, DLL = "yaps", inner.control = list(maxit = 100), silent=silent)
+# #}   
+
+
+
+#------------
 
 # seem to be having some trouble while bringing in the rest of the detections.
 # running all of the above code, but in a non-fresh environment...
@@ -112,7 +150,7 @@ for (focal_tag in fish_tags) {
   yaps_out <- runYaps(inp,silent=TRUE)
   # gives warnings about NaNs produced?
   # and the track is quite short.
-  # what if I give it only triplerx? No warnings, and the track is longer.
+  # what if I give it only triplerx?  No warnings, and the track is longer.
   # And when I give it the longer dataset, even though it loses some crap
   # to 11, the overall track is actually longer and looks pretty good.
   plotYapsEllipses(inp=inp,yaps_out=yaps_out)

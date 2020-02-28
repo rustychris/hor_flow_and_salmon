@@ -15,16 +15,18 @@ import parse_tek as pt
 import pandas as pd
 import six
 ## 
+six.moves.reload_module(prepare_pings)
 
 # ping_matcher_2018 may need some manual tweaks to deal with
 # receivers that are too far out of sync.
 pm=prepare_pings.ping_matcher_2018(split_on_clock_change=True)
+pm.allow_dual_bad_pings=True
 
 # Looks like it's probably okay
 for d in pm.all_detects:
     print(f"{d.name.item()} {str(d.time.values[0])} -- {str(d.time.values[-1])}")
     
-## 
+
 def fmt(d):
     return utils.to_datetime(d).strftime("%Y%m%dT%H%M")
 
@@ -37,8 +39,6 @@ def fmt(d):
 pm.max_shift=60
 pm.max_drift=0.0 # any faster?
 pm_nomp=pm.remove_multipath()
-
-##
 
 # run 4 hours chunks with a 1 hr pad before and after
 # These are too broad
@@ -59,13 +59,31 @@ while t_start<t_max_global:
     periods.append([t_start-pad,t_stop+pad])
     t_start+=duration
 
-##
 
+# add_beacon_list is called on a ds_total with index=0, and no rx.
 # This is failing - maybe because there aren't enough beacon receptions??
+# Okay - if nobody gets merged, then there isn't an rx dimension.
+# First go around, only 4 rx have pings.  and they are only
+# hearing themselves.  Either (a) match_all_by_similarity needs to
+# merge them anyway (and later split_for_yaps code will toss the whole
+# dataset), or it should return None, and downstream code deals with that.
+
+## 
+force=True
+
+periods=[ [np.datetime64('2018-04-01T23:00:00'),
+           np.datetime64('2018-04-02T05:00:00')] ]
+
+
 for period in periods:
     period_dir=f"yaps/{fmt(period[0])}-{fmt(period[1])}"
     if not os.path.exists(period_dir):
         os.makedirs(period_dir)
+        
+    fn=os.path.join(period_dir,'all_detections.csv')
+    if os.path.exists(fn) and not force:
+        print(f"{fn} exists -- will skip")
+        continue
 
     # Keep the python-side pre-match code
     # It's slow, but allows for greater clock shifts than yaps alone, and
@@ -73,16 +91,35 @@ for period in periods:
     # issues (like beacon tags with insufficient receptions)
 
     pm_clip=pm_nomp.clip_time(period)
+    # temporary
+    pm_clip.allow_dual_bad_pings=True
+    # /temporary
     ds_total=pm_clip.match_all_by_similarity()
+    if ds_total is None:
+        print(f"Processing for {period_dir} aborted -- insufficient beacon receptions")
+        continue
     pings_orig=ds_total
-    #
 
     # This was necessary in a test, and in this 2018-03-18 period, also
     # necessary, to avoid a cryptic error about subscript bounds 
     rx_mask=[not r.item().startswith('AM3') for r in pings_orig.rx]
+    print("Still removing AM3, which seems bad")
     pings=pings_orig.isel(rx=rx_mask)
     # pings=pings_orig # optimistic
 
+    # remove clock offsets --
+    mat=pings.matrix.values
+    deltas=np.zeros(mat.shape[1],np.float64)
+    for _ in range(5):
+        mat_d = mat + deltas[None,:]
+        new_deltas=np.nanmean( mat_d - np.nanmean(mat_d,axis=1)[:,None],axis=0)
+        new_deltas=np.nan_to_num(new_deltas,0)
+
+        print(f"new deltas: {np.mean(new_deltas**2)}")
+        deltas-=new_deltas
+    pings['matrix_orig']=pings['matrix']
+    pings['matrix'].values[:,:]=mat+deltas[None,:]
+    
     beacon_tags=pings.rx_beacon.values
 
     is_beacon=np.array( [ t in beacon_tags
@@ -96,10 +133,8 @@ for period in periods:
                for t in np.unique(pings.isel(index=is_triplerx).tag.values)]
     is_goodtag=np.array( [ t in good_tags
                            for t in pings.tag.values])
-    #-
 
     mask=is_goodtag & is_multirx
-    fn=os.path.join(period_dir,'all_detections.csv')
 
     bpings=pings.isel(index=mask)
     b0=bpings.to_dataframe()
@@ -134,3 +169,9 @@ for period in periods:
     df.loc[~df['sync_tag'].isin(good_tags), 'sync_tag']=np.nan
     df.to_csv(os.path.join(period_dir,'hydros.csv'),index=False)
 
+
+##
+
+# HERE:
+# adjust the times in matrix to account for the coarse drift
+# calculation.
