@@ -5,6 +5,7 @@ for clock resets (which are convered to two independent stations)
 Pass to R/yaps for fitting clock drift model.
 """
 import datetime
+import os
 import numpy as np
 import xarray as xr
 import re
@@ -68,12 +69,14 @@ while t_start<t_max_global:
 # merge them anyway (and later split_for_yaps code will toss the whole
 # dataset), or it should return None, and downstream code deals with that.
 
-## 
-force=True
+##
 
-periods=[ [np.datetime64('2018-04-01T23:00:00'),
-           np.datetime64('2018-04-02T05:00:00')] ]
-
+# Testing with re-inclusion of AM3.  This period has at least
+# one track that would really benefit from AM3
+force=False
+omit_am3=False
+#periods=[ [np.datetime64('2018-03-20T07:00:00'),
+#           np.datetime64('2018-03-20T13:00:00')] ]
 
 for period in periods:
     period_dir=f"yaps/{fmt(period[0])}-{fmt(period[1])}"
@@ -101,11 +104,13 @@ for period in periods:
     pings_orig=ds_total
 
     # This was necessary in a test, and in this 2018-03-18 period, also
-    # necessary, to avoid a cryptic error about subscript bounds 
-    rx_mask=[not r.item().startswith('AM3') for r in pings_orig.rx]
-    print("Still removing AM3, which seems bad")
-    pings=pings_orig.isel(rx=rx_mask)
-    # pings=pings_orig # optimistic
+    # necessary, to avoid a cryptic error about subscript bounds
+    if omit_am3:
+        rx_mask=[not r.item().startswith('AM3') for r in pings_orig.rx]
+        print("Still removing AM3, which seems bad")
+        pings=pings_orig.isel(rx=rx_mask)
+    else:
+        pings=pings_orig
 
     # remove clock offsets --
     mat=pings.matrix.values
@@ -172,6 +177,13 @@ for period in periods:
 
 ##
 
-# HERE:
-# adjust the times in matrix to account for the coarse drift
-# calculation.
+# AM3:
+# periods=[ [np.datetime64('2018-03-20T07:00:00'),
+#            np.datetime64('2018-03-20T13:00:00')] ]
+# Aligning 1381 hits at AM3.3 with 1426 at SM9.0
+# MATCH
+# Found 1 potential sets of matches, longest is 1369 (i=0)
+
+# That much seems fine.
+
+# rerun all, including AM3...
