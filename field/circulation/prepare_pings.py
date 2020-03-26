@@ -511,13 +511,20 @@ def merge_detections(ds_a,ds_b,matches):
 class PingMatcher(object):
     T0=None # set to a datetime64 around the time of the field data
     max_shift=20 # seconds
-    max_drift=0.005 # seconds/seconds
+    max_drift=0.005 # seconds/second
     max_delta=0.500 # seconds
     max_bad_pings=10
     verbose=False
     max_matches=1 # stop when this many potential sets of matches are found
 
     clipped=None
+
+    # Originally, when searching for bad pings, the assumption was that only
+    # one dataset or the other had bad pings.  The relatively low rate of
+    # bad pings allowed this.  But in processing all of the 2018 data,
+    # it appears that at least on occasion, during a 6 hour window, both datasets
+    # can have some bad pings
+    allow_dual_bad_pings=False
     
     def __init__(self,**kw):
         utils.set_keywords(self,kw)
@@ -525,11 +532,19 @@ class PingMatcher(object):
         
     def add_detections(self,name,det_fn,**kw):
         detects=pt.parse_tek(det_fn,name=name,**kw)
-        self.all_detects.append(detects)
+        if isinstance(detects,list):
+            for i,d in enumerate(detects):
+                d['station']=d['name']
+                d['name']=(),d['name'].item()+'.%d'%i
+                self.all_detects.append(d)
+        else:
+            detects['station']=detects['name']
+            self.all_detects.append(detects)
     def copy(self):
         pm=PingMatcher()
         pm.all_detects=self.all_detects
         pm.T0=self.T0
+        pm.allow_dual_bad_pings=self.allow_dual_bad_pings
         return pm
     
     def remove_multipath(self):
@@ -618,11 +633,11 @@ class PingMatcher(object):
 
                 if longest_fail is not None:
                     print("Longest fail: ", longest_fail)
-                    if not bad_b:
+                    if (not bad_b) or (self.allow_dual_bad_pings):
                         for a in longest_fail[0]:
                             next_bad_a=a_slc_idx[a]
                             bad_apple_search.append( (bad_a+[next_bad_a], bad_b) )
-                    if not bad_a:
+                    if (not bad_a) or (self.allow_dual_bad_pings):
                         for b in longest_fail[1]:
                             next_bad_b=b_slc_idx[b]
                             bad_apple_search.append( (bad_a, bad_b+[next_bad_b]) )
@@ -690,6 +705,7 @@ class PingMatcher(object):
         for idx_a in idxs[1:]:
             print(f"Adding idx {idx_a} into the mix")
             ds_a=detects[idx_a]
+            if len(ds_a.index)==0: continue # probably nixed during clip_time()
             tags_b=self.tag_to_num(ds_b.tag.values)
             tags_a=self.tag_to_num(ds_a.tag.values)
 
@@ -711,6 +727,90 @@ class PingMatcher(object):
 
         return ds_b
 
+    def match_all_by_similarity(self):
+        """
+        Similar to match_all(), but process the groups in order of best 
+        potential match. In some cases this is more successful than match_all().
+        match_all() uses the given order of receivers. 
+        For example, with receivers [A,B,C], it may be the case that 
+        A-B is poorly constrained, but A-C and B-C are constrained.  match_all()
+        may get A-B wrong, which then sinks the rest of the matching.
+        The approach here evaluates each pair in terms of the maximum possible 
+        number of matches, and matches the pair with the greatest possible
+        number of matches first.  This is repeated iteratively until no
+        more potential matches are possible.
+
+        detects: list of xr.Dataset, each one giving the time and tags from a single
+        receiver.
+
+        returns a merged dataset matching up as many of the pings as possible, or None
+          in the case that there are no possible beacon tag alignments. That will
+          happen when no receiver hear another receiver.  Note that this ignores
+          non-beacon tags that might be heard by multiple receivers and allow a coarse
+          clock alignment (ignored because most likely there won't enough data to 
+          complete trilateration)
+        """
+        self.prepare()
+        beacon_tags=np.unique([ds.beacon_id.item() for ds in self.all_detects])
+
+        # Filter down to rx that actually have some pings
+        dss=[ds for ds in self.all_detects if ds.dims['index']]
+
+        while len(dss)>1:
+            Ndet=len(dss)
+
+            tag_counts=[ [ (ds.tag.values==b).sum() for b in beacon_tags ]
+                         for ds in dss ]
+
+            best_match=[0,None]
+            for ds_ai in range(Ndet):
+                for ds_bi in range(ds_ai+1,Ndet):
+                    # dss can contain sequential instances of the same stations,
+                    # before/after a clock reset.  Would like to ignore cases where station
+                    # is the same.  Not that simple.  Only the original datasets
+                    # have station.
+                    # If it's not ignored here, then we risk match_sequences failing
+                    # below, and then we won't know how to proceed.
+                    # Instead, ignore cases where the times do not significantly overlap.
+                    # Still not great...
+                    common_start=max(dss[ds_ai].tnum.values[0], dss[ds_bi].tnum.values[0])
+                    common_end = min(dss[ds_ai].tnum.values[-1],dss[ds_bi].tnum.values[-1])
+                    t_overlap=common_end-common_start
+                    # don't process if less than 10 minutes. Note that big clock shifts
+                    # like an hour will screw this up, but none of this process can deal
+                    # with errors that large.
+                    if t_overlap<600.0: 
+                        continue
+                    
+                    a_tag_counts=tag_counts[ds_ai]
+                    b_tag_counts=tag_counts[ds_bi]
+                    # calculate a max possible number of matches
+                    ab_tag_counts=[ min(a,b) for a,b in zip(a_tag_counts,b_tag_counts)]
+                    sim=np.sum(ab_tag_counts)
+                    if sim>best_match[0]:
+                        best_match=[sim,(ds_ai,ds_bi)]
+            if best_match[0]==0:
+                break
+            ai,bi=best_match[1]
+            print(f"Will match ai={ai} bi={bi} with best possible length of {best_match[0]}")
+            ab=self.match_sequences(dss[ai], dss[bi])
+            dss=dss[:ai] + dss[ai+1:bi] + dss[bi+1:]
+            dss.append(ab)
+
+        # Scan the remaining datasets, and hope that exactly one has merged results.
+        merged_dss=[ds for ds in dss if ds.dims.get('rx',0)>0 ]
+        if len(merged_dss)==0:
+            return None
+        elif len(merged_dss)>1:
+            # Probably an indication of a bug.  It *could* be real, in which case
+            # the easiest solution is to return the one with the most total pings,
+            # but that would discard the information in the other connected components.
+            raise Exception("Multiple connected components of rx.  Not ready for that")
+        else:
+            ds_result=merged_dss[0]
+            self.add_beacon_list(ds_result)    
+            return ds_result
+    
     def set_rx_locations(self,df):
         """
         Save UTM coordinate info.  df should be indexed
@@ -718,7 +818,7 @@ class PingMatcher(object):
         """
         self.rx_locs=df
         for d in self.all_detects:
-            name=d.name.item()
+            name=d.station.item()
             if name in self.rx_locs.index:
                 x,y,z=self.rx_locs.loc[name,['x','y','z']].values
             else:
@@ -746,9 +846,13 @@ class PingMatcher(object):
         return ds_total
 
 
-def ping_matcher_2018():
-    # Load up 2018 data
+def ping_matcher_2018(**kw):
+    """
+    Load 2018 data.  This is intended as the single starting point 
+    for processing 2018 data
     
+    keywords arguments passed to add_detections()
+    """
     pm=PingMatcher()
     pm.T0=np.datetime64('2018-02-01 00:00')
 
@@ -758,31 +862,31 @@ def ping_matcher_2018():
     # AM2 should be FF08, based on hearing itself.
 
     pm.add_detections(name='AM1',det_fn='2018_Data/AM1_20186009/050318/AM1180711347.DET',
-                      pressure_range=None)
+                      pressure_range=None,**kw)
     pm.add_detections(name='AM2',det_fn='2018_Data/AM2_20186008/043018/AM2180711401.DET',
-                      pressure_range=None)
+                      pressure_range=None,**kw)
     pm.add_detections(name='AM3',det_fn='2018_Data/AM3_20186006/043018/2018-6006180621239.DET',
-                      pressure_range=None)
+                      pressure_range=None,**kw)
     pm.add_detections(name='AM4',det_fn='2018_Data/AM4_20186005/050118/2018-6005180671524.DET',
-                      pressure_range=None)
+                      pressure_range=None,**kw)
     pm.add_detections(name='AM5',det_fn='2018_Data/AM5_20186004/050318/2018-6004180671635.DET',
-                      pressure_range=None)
+                      pressure_range=None,**kw)
     pm.add_detections(name='AM8',det_fn='2018_Data/AM8_20186002/043018/2018-6002180401450.DET',
-                      pressure_range=None)
+                      pressure_range=None,**kw)
     pm.add_detections(name='AM9',det_fn='2018_Data/AM9_20186001/043018/AM9180711355.DET',
-                      pressure_range=None)
+                      pressure_range=None,**kw)
     pm.add_detections(name='SM1',det_fn='2018_Data/SM1_20187013/050218/SM1180711252.DET',
-                      pressure_range=None)
+                      pressure_range=None,**kw)
     pm.add_detections(name='SM2',det_fn='2018_Data/SM2_20187014/050218/SM2180711257.DET',
-                      pressure_range=None)
+                      pressure_range=None,**kw)
     pm.add_detections(name='SM3',det_fn='2018_Data/SM3_20187015/SM3180711301.DET',
-                      pressure_range=None)
+                      pressure_range=None,**kw)
     pm.add_detections(name='SM4',det_fn='2018_Data/SM4_20187018/050218/SM6180711928.DET',
-                      pressure_range=None)
+                      pressure_range=None,**kw)
     pm.add_detections(name='SM8',det_fn='2018_Data/SM8_20187017/050218/SM5180711921.DET',
-                      pressure_range=None)
+                      pressure_range=None,**kw)
     pm.add_detections(name='SM9',det_fn='2018_Data/SM9_20187024/050218/SM12180721837.DET',
-                      pressure_range=None)
+                      pressure_range=None,**kw)
 
     pm.set_rx_locations(rx_locations_2018())
 

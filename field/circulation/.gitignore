@@ -1,3 +1,6 @@
 *~
 __pycache__
 MSD*.nc
+.ipynb_checkpoints
+.RData
+.Rhistory
