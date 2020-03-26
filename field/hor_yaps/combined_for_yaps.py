@@ -18,7 +18,9 @@ import prepare_pings
 import parse_tek as pt
 import pandas as pd
 import six
-## 
+##
+utils.path("../circulation")
+
 six.moves.reload_module(prepare_pings)
 
 # ping_matcher_2018 may need some manual tweaks to deal with
