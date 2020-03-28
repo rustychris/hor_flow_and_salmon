@@ -35,16 +35,16 @@ def read_from_folder(path):
     """
     reverse of dump_to_folder.
     """
-    df_out=pd.read_csv(os.path.join(path,'master.csv'))
+    df_out=pd.read_csv(os.path.join(path,'master.csv'),index_col=0)
 
-    fn_cols=[col for col in df.columns.values if col.endswith('_fn')]
+    fn_cols=[col for col in df_out.columns.values if col.endswith('_fn')]
 
     def ingest_csv(fn):
         return pd.read_csv(os.path.join(path,fn))
     
     for fn_col in fn_cols:
         df_col=fn_col.replace('_fn','')
-        df_out[df_col]=df[fn_col].apply(ingest_csv)
+        df_out[df_col]=df_out[fn_col].apply(ingest_csv)
 
         del df_out[fn_col]
-
+    return df_out
