@@ -11,7 +11,7 @@ crs(dem) <- '+proj=utm +zone=10 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no
 dem_slope <- terrain(dem, opt='slope')
 dem_aspect <- terrain(dem, opt='aspect')
 hill <- hillShade(dem_slope, dem_aspect, 40, 270)
-
+  
 
 plotYapsEllipses <- function(inp,yaps_out,focal_tag=""){
   # customized plotting - map view with some indication of uncertainty
@@ -60,7 +60,8 @@ pre_hydros<-data.table::fread('yap-positions.csv')
 serial_blacklist=c()
 
 force_tags<-TRUE
-# There are now 3 periods
+presync<-TRUE
+
 if(FALSE){
   period_dir<-'yaps/full/20180313T1900-20180316T0152'
   fixed_hydros <- NULL # c(5,6) # AM5.0, AM8.8 ?
@@ -87,7 +88,7 @@ if(FALSE){
   time_keeper_idx <- 6
 }
 
-if(FALSE){
+if(TRUE){
   # with everybody fixed, the initial go at v04 had
   # some large-ish errors in the sync.
   # only 4 tracks, so maybe not a big deal.
@@ -102,7 +103,7 @@ if(FALSE){
   time_keeper_idx <- 6
 }
 
-if(TRUE) {
+if(FALSE) {
   # First go, this yielded some really bad sync errors, and just
   # a couple of bad tracks.  Try again.
   # Hydro 7 appears to be the bad guy
@@ -116,7 +117,12 @@ if(TRUE) {
 # also, any sync_tag that is not received by at least 3 rxs (self+2)  
 # at least once, causes issues. Those have been filtered out upstream.
 hydros<-data.table::fread(file.path(period_dir,"hydros.csv"),fill=TRUE,na.strings=c(""))
-all_detections<-data.table::fread(file.path(period_dir,"all_detections.csv"),fill=TRUE)
+
+if(presync) {
+  all_detections<-data.table::fread(file.path(period_dir,"all_detections_sync.csv"),fill=TRUE)
+} else {
+  all_detections<-data.table::fread(file.path(period_dir,"all_detections.csv"),fill=TRUE)
+}
 
 # Populate fixed hydros based on what's in pre_hydros
 if( is.null(fixed_hydros) ) {
@@ -143,12 +149,15 @@ all_detections <- all_detections[ !(all_detections$serial %in% serial_blacklist)
 # v02: same, but n_offset_day=4, n_ss_day=4 
 # v03: n_offset_day=8, to match older code.
 # v04: try fixing more stations
-out_dir<-file.path(period_dir,'v04')
+# v05: bump up ss per day
+# v06: presynced data
+out_dir<-file.path(period_dir,'v06')
 if ( ! dir.exists(out_dir)) {
   dir.create(out_dir)
 }
-sync_fn=file.path(out_dir,'sync_save')
 
+
+sync_fn=file.path(out_dir,'sync_save')
 
 beacon2018<-c()
 beacon2018$hydros <- hydros
@@ -157,46 +166,52 @@ beacon2018$detections <- all_detections
 # Process tags:
 fish_tags<-setdiff( unique(all_detections$tag), hydros$sync_tag)
 
-if ( !file.exists(sync_fn) ) {
-  # Seems that this is quite sensitive to the "time_keeper_idx"
-  inp_sync <- getInpSync(sync_dat=beacon2018, 
-                         max_epo_diff = 10,
-                         min_hydros = 3, 
-                         time_keeper_idx = time_keeper_idx,
-                         fixed_hydros_idx = fixed_hydros, # maybe need to avoid SM9, which has no sync tag?
-                         n_offset_day = 8,
-                         n_ss_day = 4)
+if ( !presync ) {
+  if ( !file.exists(sync_fn) ) {
+    # Seems that this is quite sensitive to the "time_keeper_idx"
+    inp_sync <- getInpSync(sync_dat=beacon2018, 
+                           max_epo_diff = 10,
+                           min_hydros = 3, 
+                           time_keeper_idx = time_keeper_idx,
+                           fixed_hydros_idx = fixed_hydros, # maybe need to avoid SM9, which has no sync tag?
+                           n_offset_day = 8,
+                           n_ss_day = 8)
+    
+    sync_model <- getSyncModel(inp_sync,silent=FALSE)
+    save(sync_model,file=sync_fn)
+    
+    plotSyncModelResids(sync_model,by="overall")
+    dev.copy(png,file.path(out_dir,"sync-overall.png"))
+    dev.off()
+    plotSyncModelResids(sync_model,by="sync_tag")
+    dev.copy(png,file.path(out_dir,"sync-by_tag.png"))
+    dev.off()
+    
+    plotSyncModelResids(sync_model,by="hydro")
+    dev.copy(png,file.path(out_dir,"sync-by_hydro.png"))
+    dev.off()
+    plotSyncModelCheck(sync_model,by="sync_bin_sync")
+    dev.copy(png,file.path(out_dir,"sync-bin_sync.png"))
+    dev.off()
+    plotSyncModelCheck(sync_model,by="sync_bin_hydro")
+    dev.copy(png,file.path(out_dir,"sync-bin_hydro.png"))
+    dev.off()
+    plotSyncModelCheck(sync_model,by="sync_tag")
+    dev.copy(png,file.path(out_dir,"sync-check_by_tag.png"))
+    dev.off()
+    plotSyncModelCheck(sync_model,by="hydro")
+    dev.copy(png,file.path(out_dir,"sync-check_by_hydro.png"))
+    dev.off()
+  } else {
+    load(file=sync_fn)
+  }
   
-  sync_model <- getSyncModel(inp_sync,silent=FALSE)
-  save(sync_model,file=sync_fn)
-  
-  plotSyncModelResids(sync_model,by="overall")
-  dev.copy(png,file.path(out_dir,"sync-overall.png"))
-  dev.off()
-  plotSyncModelResids(sync_model,by="sync_tag")
-  dev.copy(png,file.path(out_dir,"sync-by_tag.png"))
-  dev.off()
-  
-  plotSyncModelResids(sync_model,by="hydro")
-  dev.copy(png,file.path(out_dir,"sync-by_hydro.png"))
-  dev.off()
-  plotSyncModelCheck(sync_model,by="sync_bin_sync")
-  dev.copy(png,file.path(out_dir,"sync-bin_sync.png"))
-  dev.off()
-  plotSyncModelCheck(sync_model,by="sync_bin_hydro")
-  dev.copy(png,file.path(out_dir,"sync-bin_hydro.png"))
-  dev.off()
-  plotSyncModelCheck(sync_model,by="sync_tag")
-  dev.copy(png,file.path(out_dir,"sync-check_by_tag.png"))
-  dev.off()
-  plotSyncModelCheck(sync_model,by="hydro")
-  dev.copy(png,file.path(out_dir,"sync-check_by_hydro.png"))
-  dev.off()
+  #NB: this will modify all_detections in place 
+  detections_synced <- applySync(toa=all_detections, hydros=hydros, sync_model)
 } else {
-  load(file=sync_fn)
+  # But I need to read in sound speed somewhere, too.
+  detections_synced <- all_detections
 }
-
-detections_synced <- applySync(toa=all_detections, hydros=hydros, sync_model)
 
 hydros_yaps <- data.table::data.table(sync_model$pl$TRUE_H)
 colnames(hydros_yaps) <- c('hx','hy','hz')
@@ -246,6 +261,9 @@ for (focal_tag in fish_tags) {
   if (is.null(toa)){next}
   
   for( try_num in 1:max_tries_runYaps ) {
+    # Sort of missing an opportunity to use the precalculated
+    # soundspeed.  Would be slightly annoying as the ss is read into synced_dat
+    # in long form, but is supplied to getInp with length same as toa.
     inp <- getInp(hydros_yaps, toa, E_dist="Mixture", n_ss=2,pingType='rbi',
                     sdInits=1,rbi_min=rbi_min,rbi_max=rbi_max,ss_data_what="est",
                     ss_data=0)
@@ -258,7 +276,7 @@ for (focal_tag in fish_tags) {
   plotYapsEllipses(inp=inp,yaps_out=yaps_out,focal_tag=focal_tag)
   # And save a plot:
   for( i in 1:10 ) {
-    img_fn<-file.path(out_dir,paste("track-",focal_tag,i,".png",sep=""))
+    img_fn<-file.path(out_dir,paste("track-",focal_tag,"_",i,".png",sep=""))
     if ( !file.exists((img_fn))) {
       break
     }
