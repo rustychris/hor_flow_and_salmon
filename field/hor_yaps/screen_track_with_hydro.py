@@ -1,5 +1,5 @@
 """
-Additional screening based on tracks after hydro data has been added.
+Plot tracks with after obvious bad tracks removed.
 """
 import os
 import glob
@@ -9,8 +9,8 @@ import matplotlib.pyplot as plt
 import track_common
 ##
 
-input_path="cleaned_v00"
-fig_dir=os.path.join(input_path,'figs-20200326')
+input_path="screened"
+fig_dir=os.path.join(input_path,'figs-20200406')
 if not os.path.exists(fig_dir):
     os.makedirs(fig_dir)
 
@@ -32,7 +32,7 @@ dem=field.GdalGrid("../../bathy/junction-composite-dem-no_adcp.tif")
 
 # Concatenate into a single dataframe for some of these plots
 for idx,row in df_screen.iterrows():
-    row['track']['id'] = row['id']
+    row['track']['id'] = idx
     
 seg_tracks=pd.concat( [ track.iloc[:-1,:]
                         for track in df_screen['track'].values ] )
@@ -131,6 +131,9 @@ fig.savefig(os.path.join(fig_dir,"all_segments-weight_by_time.png"))
 
 ##
 
+model_u='model_u'
+model_v='model_v'
+
 def fig_track_swimming(seg_track,num=20,zoom=None,buttons=True):
     seg_track=seg_track[ np.isfinite(seg_track['ground_u'].values) ]
     
@@ -203,12 +206,13 @@ def fig_track_swimming(seg_track,num=20,zoom=None,buttons=True):
 
     ax_hist=fig.add_subplot(gs[1,:])
 
+    Uscale=0.6
     xvals=-seg_track['swim_vrel'] 
     yvals=seg_track['swim_urel']
     sns.kdeplot(xvals,yvals,
                 shade_lowest=False,
-                clip=[ [-0.5,0.5],[-0.5,0.5]],
-                linewidths=0.5,
+                clip=[ [-Uscale,Uscale],[-Uscale,Uscale]],
+                linewidths=0.5,levels=5,
                 ax=ax_hist)
 
     scat=ax_hist.scatter( xvals,yvals, 8, elapsed,cmap=turbo )
@@ -219,7 +223,6 @@ def fig_track_swimming(seg_track,num=20,zoom=None,buttons=True):
     ax_hist.axvline(0.0,color='0.5',lw=0.5)
     plt.colorbar(scat,ax=ax_hist,label="Elapsed time (s)")
 
-    Uscale=0.4
     ax_hist.axis( [-Uscale,Uscale,-Uscale,Uscale] )
     fig.tight_layout()
     plots['fig']=fig
@@ -241,18 +244,18 @@ def fig_track_swimming(seg_track,num=20,zoom=None,buttons=True):
 # 7a96 is picture perfect.  But it has pretty big standard deviations in this run,
 # and didn't make the cut.  It still looks okay. So maybe worth relaxing that constraint?
 # 7577 is positive rheotaxis
-df_by_id=df_screen.set_index('id')
 
-plots=fig_track_swimming(df_by_id.loc['7659','track'],
+plots=fig_track_swimming(df_screen.loc['7A96','track'],
                          num=20)
+
 ## 
 tag_fig_dir=os.path.join(fig_dir,'tags')
 if not os.path.exists(tag_fig_dir):
     os.makedirs(tag_fig_dir)
     
-for tag in df_by_id.index.values:
+for tag in df_screen.index.values:
     print(tag)
-    plots=fig_track_swimming(df_by_id.loc[tag,'track'],num=21,
+    plots=fig_track_swimming(df_screen.loc[tag,'track'],num=21,
                              buttons=False)
     plots['fig'].savefig(os.path.join(tag_fig_dir,'%s-swimming.png'%plots['tag']))
 

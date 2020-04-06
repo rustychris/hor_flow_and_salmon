@@ -1,0 +1,10 @@
+,adcp_fn,track_fn
+0,../adcp/040518_BT/040518_7_BTref-avg_with_time.nc,track-0.csv
+1,../adcp/040518_BT/040518_2BTref-avg_with_time.nc,track-1.csv
+2,../adcp/040518_BT/040518_3_BTref-avg_with_time.nc,track-2.csv
+3,../adcp/040518_BT/040518_9BTref-avg_with_time.nc,track-3.csv
+4,../adcp/040518_BT/040518_8BTref-avg_with_time.nc,track-4.csv
+5,../adcp/040518_BT/040318_1_BTref-avg_with_time.nc,track-5.csv
+6,../adcp/040518_BT/040518_5BTref-avg_with_time.nc,track-6.csv
+7,../adcp/040518_BT/040518_4BTref-avg_with_time.nc,track-7.csv
+8,../adcp/040518_BT/040518_6BTref-avg_with_time.nc,track-8.csv

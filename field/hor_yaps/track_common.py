@@ -8,7 +8,8 @@ def dump_to_folder(df,path,clean=True):
     are written as separate csvs, indexed by the field name
     """
     if clean and os.path.exists(path):
-        shutil.rmtree(path)
+        for fn in glob.glob(os.path.join(path,'*.csv')):
+            os.unlink(fn)
         
     if not os.path.exists(path):
         os.makedirs(path)

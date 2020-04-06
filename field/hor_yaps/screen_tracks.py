@@ -10,6 +10,12 @@ import numpy as np
 import track_common
 
 ##
+
+fig_dir="figs20200406"
+if not os.path.exists(fig_dir):
+    os.makedirs(fig_dir)
+
+##     
 raw_csv_patt='yaps/full/v06/track*.csv'
 raw_csvs=glob.glob(raw_csv_patt)
 
@@ -93,7 +99,7 @@ if 1: # Plot the global distribution of position standard deviations
     axs[1].set_ylabel('Count of position estimates')
     axs[2].set_ylabel('Count of position estimates')
     
-    fig.savefig('merge-distribution-stddev.png')
+    fig.savefig(os.path.join(fig_dir,'merge-distribution-stddev.png'))
 ##
 
 # Write these out so we can get hydro
@@ -104,10 +110,8 @@ track_common.dump_to_folder(df_merged,'merged_v00')
 
 # Read them back in with hydro
 df_mergedh=track_common.read_from_folder('mergedhydro_v00')
+del df_mergedh['track']
 df_mergedh.rename( columns={'withhydro':'track'}, inplace=True)
-
-# This is a beacon tag that was ignored for some periods
-df_mergedh=df_mergedh.drop('FF01')
 
 ##
 
@@ -131,11 +135,11 @@ def trim_weak_solutions(track):
     else:
         return track.iloc[triple_rx[0]:triple_rx[-1]+1,:].copy()
     
-df['trimmed']=df['track'].apply(trim_weak_solutions)
+df['track']=df['track'].map(trim_weak_solutions)
 # And limit to tracks that still exist
-df_trimmed=df[ df['trimmed'].notnull() ]
+df_trimmed=df[ df['track'].notnull() ]
 
-print("%d tracks remain after trimming weak solutions and ends"%len(df_trimmed)) # 179
+print("%d tracks remain after trimming weak solutions and ends"%len(df_trimmed)) # 181
 
 ##
 
@@ -151,30 +155,24 @@ def calc_groundspeed(track):
     speed=np.sqrt(dx**2+dy**2)/dt
     track['groundspeed']=np.r_[speed,np.nan]
 
-df_trimmed['trimmed'].apply(calc_groundspeed)
+df_trimmed['track'].apply(calc_groundspeed)
     
 if 1: # Plot the global distribution of groundspeed
     all_spd=np.concatenate( [ df.groundspeed.values
-                              for df in df_trimmed['trimmed'] ])
+                              for df in df_trimmed['track'] ])
     all_spd=all_spd[np.isfinite(all_spd)]
     plt.figure(2).clf()
     fig,ax=plt.subplots(num=2)
     ax.hist(all_spd,bins=np.linspace(0,3.0,100),log=True)
     ax.set_ylabel('Segment count')
     ax.set_xlabel('Groundspeed (m s$^{-1}$)')
-    fig.savefig('trimmed-distribution-groundspeed.png')
+    fig.savefig(os.path.join(fig_dir,'trimmed-distribution-groundspeed.png'))
 
 # Groundspeed is not a good metric for good/bad samples.
 # Almost everything is below 1.0 m/s.
 
 ##     
 
-#  Combine to a main csv and per-track csv that can be shipped over to cws-linuxmodeling
-#  and I can add hydro velocity.
-
-track_common.dump_to_folder(df_trimmed,'cleaned_v00')
-
-##
 df=df_trimmed.copy()
 
 # A few more track parameters:
@@ -190,7 +188,7 @@ if 1:
     ax.set_xscale('log')
     ax.set_xlabel('Count of positions in track')
     ax.set_ylabel('Occurrences')
-    fig.savefig('track-position-count-hist.png')
+    fig.savefig(os.path.join(fig_dir,'track-position-count-hist.png'))
 
     plt.figure(4).clf()
     fig,ax=plt.subplots(num=4)
@@ -199,7 +197,7 @@ if 1:
     ax.set_xscale('log')
     ax.set_xlabel('Duration of track (min)')
     ax.set_ylabel('Occurrences')
-    fig.savefig('track-duration-hist.png')
+    fig.savefig(os.path.join(fig_dir,'track-duration-hist.png'))
 
 ##
 
@@ -209,14 +207,14 @@ good_posn_count=df['num_positions']>=10
 
 df_screen=df[good_duration & good_posn_count].copy()
 
-# 129
+# 134
 print("After removing long-duration or small position count tracks %d left"%(len(df_screen)))
 
 ##
 
 # Add velocities
-df_screen['trimmed'].apply(track_common.calc_velocities,
-                           model_u='model_u_surf',model_v='model_v_surf')
+df_screen['track'].apply(track_common.calc_velocities,
+                         model_u='model_u_surf',model_v='model_v_surf')
 
 ##
 
@@ -225,7 +223,7 @@ def add_seg_time_end(track):
     track['x_end']= np.r_[ track['x'].values[1:], np.nan]
     track['y_end']= np.r_[ track['y'].values[1:], np.nan]
     
-df_screen['trimmed'].apply(add_seg_time_end)
+df_screen['track'].apply(add_seg_time_end)
 
 ## 
 
