@@ -9,6 +9,7 @@ This version adapted to yaps output
 import glob, os
 import matplotlib
 import shutil
+import glob
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from scipy.interpolate import LinearNDInterpolator
@@ -31,29 +32,94 @@ six.moves.reload_module(track_common)
 df_in=track_common.read_from_folder('merged_v00')
 output_path='mergedhydro_v00'
 
-col_in='raw'
+col_in='track'
 col_out='withhydro'
 
-# This time with proper friction
-mod=sun_driver.SuntansModel.load('/opt2/san_joaquin/cfg008/cfg008_20180409')
+use_ptm_output=True
 
-seq=mod.chain_restarts()
-run_starts=np.array([mod.run_start for mod in seq])
+if use_ptm_output:
+    avg_fns=glob.glob("E:/Home/rustyh/SanJoaquin/model/suntans/cfg008/*/*.nc")
+    avg_fns.sort()
+    avg_ncs=[]
+    for fn in avg_fns:
+        nc=xr.open_dataset(fn)
+        nc['eta']=nc['Mesh2_sea_surface_elevation']
+        nc['Mesh2_face_depth'].attrs['standard_name']="sea_floor_depth"
+        nc['Mesh2_face_depth'].attrs['location']='face' # probably not standard
+        nc['dv'] = nc['Mesh2_face_depth'] # pos-down
+        nc.rename({'nMesh2_data_time':'time'},inplace=True)
+        #rename_dims({'nMesh2_data_time':'time'},
+        #               inplace=True)
+        nc['time']=nc['Mesh2_data_time']
+        nc['Mesh2_layer_3d'].attrs['standard_name']='ocean_zlevel_coordinate'
+        nc['Mesh2_layer_3d'].attrs['positive']='down' # why was this up at first?
+        # dirty, but this will actually add the necessary ugrid fields
+        # to the netcdf dataset
+        g=unstructured_grid.UnstructuredGrid.read_ugrid(nc,dialect='fishptm')
+        cc=g.cells_center()
+        nc['xv']=('nMesh2_face',), cc[:,0]
+        nc['yv']=('nMesh2_face',), cc[:,1]
+        
+        # And I need to fabricate uc,vc - but do that in the snap_for_time
+        # code.
+        avg_ncs.append(nc)
+    run_starts=[nc['time'].values[0] for nc in avg_ncs]    
+else:                          
+    # This time with proper friction
+    mod=sun_driver.SuntansModel.load('/opt2/san_joaquin/cfg008/cfg008_20180409')
+    
+    seq=mod.chain_restarts()
+    run_starts=np.array([mod.run_start for mod in seq])
 
-##
+#%%
 
 
 @memoize.memoize(lru=10)
 def map_for_run(run_i):
-    outputs=seq[run_i].map_outputs()
-    assert len(outputs)==1,"Expecting merged output"
-    return xr.open_dataset(outputs[0])
+    if use_ptm_output:
+        nc=avg_ncs[run_i]
+        return nc
+    else:
+        outputs=seq[run_i].map_outputs()
+        assert len(outputs)==1,"Expecting merged output"
+        return xr.open_dataset(outputs[0])
+
+def add_U_perot(snap):
+    cc=g.cells_center()
+    ec=g.edges_center()
+    normals=g.edges_normals()
+    
+    e2c=g.edge_to_cells()
+    
+    Uclayer=np.zeros( (g.Ncells(),snap.dims['nMesh2_layer_3d'],2), np.float64)
+    Qlayer=snap.h_flow_avg.values
+    Vlayer=snap.Mesh2_face_water_volume.values
+    
+    dist_edge_face=np.nan*np.zeros( (g.Ncells(),g.max_sides), np.float64)
+        
+    for c in np.arange(g.Ncells()):
+        js=g.cell_to_edges(c)
+        for nf,j in enumerate(js):
+            # normal points from cell 0 to cell 1
+            if e2c[j,0]==c: # normal points away from c
+                csgn=1
+            else:
+                csgn=-1
+            dist_edge_face[c,nf]=np.dot( (ec[j]-cc[c]), normals[j] ) * csgn
+            # Uc ~ m3/s * m
+            Uclayer[c,:,:] += Qlayer[j,:,None]*normals[j,None,:]*dist_edge_face[c,nf]
+            
+    Uclayer /= np.maximum(Vlayer,0.01)[:,:,None]
+    snap['uc']=('nMesh2_layer_3d','nMesh2_face'),Uclayer[:,:,0].transpose()
+    snap['vc']=('nMesh2_layer_3d','nMesh2_face'),Uclayer[:,:,1].transpose()
 
 @memoize.memoize(lru=50)
-def snap_for_time(run_i,t):
+def snap_for_time(run_i,t_i):
     map_ds=map_for_run(run_i)
-    time_idx=utils.nearest(map_ds.time.values, t)
-    return map_ds.isel(time=time_idx)
+    snap=map_ds.isel(time=t_i)
+    if use_ptm_output:
+        add_U_perot(snap)
+    return snap
 
 @memoize.memoize(lru=10)
 def ug_for_run(run_i):
@@ -71,20 +137,20 @@ def smoother():
     return ug.grid.smooth_matrix(f=0.5)
 
 @memoize.memoize(lru=20)
-def depth_avg(run_i,t):
+def depth_avg(run_i,t_i):
     ug=ug_for_run(run_i)
-    time_idx=utils.nearest(ug.nc.time.values, t)
+    #time_idx=utils.nearest(ug.nc.time.values, t)
     # have to transpose as the velocities have Nk first, but
     # this defaults to Nk second
-    return ug.vertical_averaging_weights(time_slice=time_idx,ztop=0,zbottom=0).T
+    return ug.vertical_averaging_weights(time_slice=t_i,ztop=0,zbottom=0).T
 
 @memoize.memoize(lru=20)
-def surf_50cm(run_i,t):
+def surf_50cm(run_i,t_i):
     ug=ug_for_run(run_i)
-    time_idx=utils.nearest(ug.nc.time.values, t)
+    #time_idx=utils.nearest(ug.nc.time.values, t)
     # have to transpose as the velocities have Nk first, but
     # this defaults to Nk second
-    return ug.vertical_averaging_weights(time_slice=time_idx,ztop=0,dz=0.5).T
+    return ug.vertical_averaging_weights(time_slice=t_i,ztop=0,dz=0.5).T
 
 #eps=0.5 # finite difference length scale
 eps=2.0
@@ -99,18 +165,26 @@ def pnts_for_interpolator():
     dt=Delaunay(pnts)
     return dt
 
+def quantize_time(t):
+    run_i=np.searchsorted(run_starts,t)-1
+    ug=ug_for_run(run_i)
+    if use_ptm_output:
+        time_idx=np.searchsorted(ug.nc.time.values,t)
+    else:
+        time_idx=utils.nearest(ug.nc.time.values, t)
+    return run_i,time_idx
+
 @memoize.memoize(lru=20)
-def interpolator(run_i,t):
+def interpolator(run_i,t_i):
     """
     Returns a function that takes [...,2] coordinate arrays on 
     input, and for the nearest time step of output spatially
     interpolates uc,vc,z_eta,z_bed.
     """
     ug=ug_for_run(run_i)
-
     z_bed=get_z_bed()
 
-    snap=snap_for_time(run_i,t)
+    snap=snap_for_time(run_i,t_i)
 
     pnts=pnts_for_interpolator()
     
@@ -118,7 +192,7 @@ def interpolator(run_i,t):
     z_eta=snap['eta'].values
 
     # depth average
-    weights=depth_avg(run_i,t)
+    weights=depth_avg(run_i,t_i)
     u3d=snap.uc.values
     v3d=snap.vc.values
     u2d=np.where(np.isnan(u3d),0,weights*u3d).sum(axis=0)
@@ -127,7 +201,7 @@ def interpolator(run_i,t):
     return LinearNDInterpolator(pnts, values)
 
 @memoize.memoize(lru=20)
-def surf_interpolator(run_i,t):
+def surf_interpolator(run_i,t_i):
     """
     Returns a function that takes [...,2] coordinate arrays on 
     input, and for the nearest time step of output spatially
@@ -135,11 +209,11 @@ def surf_interpolator(run_i,t):
     watercolumn
     """
     ug=ug_for_run(run_i)
-    snap=snap_for_time(run_i,t)
+    snap=snap_for_time(run_i,t_i)
     pnts=pnts_for_interpolator()
     
     # top 50cm
-    weights=surf_50cm(run_i,t)
+    weights=surf_50cm(run_i,t_i)
     u3d=snap.uc.values
     v3d=snap.vc.values
     u2d=np.where(np.isnan(u3d),0,weights*u3d).sum(axis=0)
@@ -178,10 +252,10 @@ for idx,row in df_in.iterrows(): #track_fn in track_fns:
     for i,seg in utils.progress( track.iloc[:-1,:].iterrows() ):
         rec={} # new fields to be added to segments.
         t=seg['time_m'].to_datetime64()
-        run_i=np.searchsorted(run_starts,t)-1
-        snap=snap_for_time(run_i,t)
+        run_i,t_i=quantize_time(t)
+        # snap=snap_for_time(run_i,t_i)
 
-        Uint=interpolator(run_i,t)
+        Uint=interpolator(run_i,t_i)
         
         # vorticity at centers
         x_samp=np.array( [ [seg['x_m']    , seg['y_m']      ],
@@ -203,7 +277,7 @@ for idx,row in df_in.iterrows(): #track_fn in track_fns:
         rec['model_z_eta']=u[0,2]
         rec['model_z_bed']=u[0,3]
 
-        Usurf=surf_interpolator(run_i,t)
+        Usurf=surf_interpolator(run_i,t_i)
         u=Usurf(x_samp)
         u=np.where(np.isfinite(u),u,0)
         # central differencing
