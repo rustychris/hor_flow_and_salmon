@@ -71,7 +71,7 @@ def adcp_to_track(adcp_fn):
 recs=[]
 
 for fn in adcp_fns:
-    rec=dict(adcp_fn=fn)
+    rec=dict(adcp_src=fn)
     rec['track']=adcp_to_track(fn)
     recs.append(rec)
     

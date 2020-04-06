@@ -1,4 +1,4 @@
-,adcp_fn,track_fn
+,adcp_src,track_fn
 0,../adcp/040518_BT/040518_7_BTref-avg_with_time.nc,track-0.csv
 1,../adcp/040518_BT/040518_2BTref-avg_with_time.nc,track-1.csv
 2,../adcp/040518_BT/040518_3_BTref-avg_with_time.nc,track-2.csv
