@@ -29,11 +29,15 @@ import track_common
 import six
 six.moves.reload_module(track_common)
 
-df_in=track_common.read_from_folder('merged_v00')
-output_path='mergedhydro_v00'
+if 0: # for fish tracks
+    df_in=track_common.read_from_folder('merged_v00')
+    output_path='mergedhydro_v00'
+else: # for ADCP data
+    df_in=track_common.read_from_folder('adcp_2018')
+    output_path='adcp_2018_hydro'
 
 col_in='track'
-col_out='withhydro'
+col_out='track'
 
 use_ptm_output=True
 
