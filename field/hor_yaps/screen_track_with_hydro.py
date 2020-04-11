@@ -3,13 +3,14 @@ Plot tracks with after obvious bad tracks removed.
 """
 import os
 import glob
+from scipy.signal import medfilt
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import track_common
 ##
 
-input_path="screened"
+input_path="screened_sun"
 fig_dir=os.path.join(input_path,'figs-20200406')
 if not os.path.exists(fig_dir):
     os.makedirs(fig_dir)
@@ -24,6 +25,10 @@ from stompy.spatial import field
 import seaborn as sns
 import stompy.plot.cmap as scmap
 turbo=scmap.load_gradient('turbo.cpt')
+
+##
+
+hydros=pd.read_csv('yap-positions.csv')
 
 ## 
 dem=field.GdalGrid("../../bathy/junction-composite-dem-no_adcp.tif")
@@ -134,7 +139,8 @@ fig.savefig(os.path.join(fig_dir,"all_segments-weight_by_time.png"))
 model_u='model_u'
 model_v='model_v'
 
-def fig_track_swimming(seg_track,num=20,zoom=None,buttons=True):
+def fig_track_swimming(seg_track,num=20,zoom=None,buttons=True,
+                       swim_filt=None):
     seg_track=seg_track[ np.isfinite(seg_track['ground_u'].values) ]
     
     fig=plt.figure(num)
@@ -194,13 +200,15 @@ def fig_track_swimming(seg_track,num=20,zoom=None,buttons=True):
         
     for t in plots['togglers']:
         t.set_visible(0)
+
+    ax.plot(hydros.yap_x,hydros.yap_y,'o',mfc='none',mec='k',zorder=-1)
     
     dc=dem.crop([ zoom[0]-500,
                   zoom[1]+500,
                   zoom[2]-500,
                   zoom[3]+500] )
     dc.plot(ax=ax,zorder=-5,cmap='gray',clim=[-20,10],interpolation='bilinear')
-    dc.plot_hillshade(ax=ax,z_factor=1,plot_args=dict(interpolation='bilinear'))
+    dc.plot_hillshade(ax=ax,z_factor=1,plot_args=dict(interpolation='bilinear',zorder=-4))
     ax.axis(zoom)
     ax.axis('off')
 
@@ -209,6 +217,11 @@ def fig_track_swimming(seg_track,num=20,zoom=None,buttons=True):
     Uscale=0.6
     xvals=-seg_track['swim_vrel'] 
     yvals=seg_track['swim_urel']
+
+    if swim_filt is not None:
+        xvals=swim_filt(xvals)
+        yvals=swim_filt(yvals)
+        
     sns.kdeplot(xvals,yvals,
                 shade_lowest=False,
                 clip=[ [-Uscale,Uscale],[-Uscale,Uscale]],
@@ -244,9 +257,12 @@ def fig_track_swimming(seg_track,num=20,zoom=None,buttons=True):
 # 7a96 is picture perfect.  But it has pretty big standard deviations in this run,
 # and didn't make the cut.  It still looks okay. So maybe worth relaxing that constraint?
 # 7577 is positive rheotaxis
-
+from stompy import filters
 plots=fig_track_swimming(df_screen.loc['7A96','track'],
-                         num=20)
+                         num=20,
+                         #swim_filt=lambda x: medfilt(x,9)
+                         # swim_filt=lambda x: filters.lowpass_fir(x,winsize=13))
+                         )
 
 ## 
 tag_fig_dir=os.path.join(fig_dir,'tags')

@@ -109,9 +109,10 @@ track_common.dump_to_folder(df_merged,'merged_v00')
 ##
 
 # Read them back in with hydro
-df_mergedh=track_common.read_from_folder('mergedhydro_v00')
-del df_mergedh['track']
-df_mergedh.rename( columns={'withhydro':'track'}, inplace=True)
+df_mergedh=track_common.read_from_folder('mergedhydro_v00_sun')
+if 'withhydro' in df_mergedh.columns:
+    del df_mergedh['track']
+    df_mergedh.rename( columns={'withhydro':'track'}, inplace=True)
 
 ##
 
@@ -176,9 +177,9 @@ if 1: # Plot the global distribution of groundspeed
 df=df_trimmed.copy()
 
 # A few more track parameters:
-df['num_positions']=[ len(track) for track in df['trimmed'].values ]
+df['num_positions']=[ len(track) for track in df['track'].values ]
 df['duration_s']=[ (track.tnum.values[-1] - track.tnum.values[0])
-                   for track in df['trimmed'].values ]
+                   for track in df['track'].values ]
 
 if 1:
     plt.figure(3).clf()
@@ -227,4 +228,190 @@ df_screen['track'].apply(add_seg_time_end)
 
 ## 
 
-track_common.dump_to_folder(df_screen,'screened')
+track_common.dump_to_folder(df_screen,'screened_sun')
+
+track_common.dump_to_shp(df_screen,'screened_sun/tracks.shp',overwrite=True)
+
+##
+
+df=df_screen
+gates=wkb2shp.shp2geom('track_gates-v00.shp')
+
+recs=[]
+
+for idx,row in df_screen.iterrows():
+    track=row['track']
+    cross=track_common.gate_crossings(track,gates)
+
+    rec={'index':idx}
+    for gidx,name in enumerate(gates['name']):
+        if 'levee' in name: continue
+        if 'point' in name: continue # never happens
+        t_first=t_last=np.nan
+        if len(cross)>0: # may have no crossings at all
+            l2r_cross=np.nonzero( (cross['gate']==gidx)& cross['l2r'] )[0]
+            if len(l2r_cross):
+                t_first=cross['tnum'][ l2r_cross[0]  ]
+                t_last =cross['tnum'][ l2r_cross[-1] ]
+        rec[name+"_first"]=t_first
+        rec[name+"_last"] =t_last
+        rec[name+"_uncrossed"]= ((cross['gate']==gidx)&(~cross['l2r'])).sum()
+    recs.append(rec)
+df_crossings=pd.DataFrame(recs).set_index('index')
+
+## 
+# Add those into df:
+df_with_crossings=pd.merge(df_screen,df_crossings,left_index=True,right_index=True)
+
+## 
+
+# Print some summary stats:
+print(f"Count of tracks: {len(df_with_crossings)}")
+for gidx,name in enumerate(gates['name']):
+    if ('levee' in name) or (name=='point'): continue
+    t_first=df_with_crossings[name+"_first"]
+    t_last=df_with_crossings[name+"_last"]
+    n_crossed=t_first.count()
+    n_multiple=(t_first<t_last).sum()
+    n_uncross=(df_with_crossings[name+"_uncrossed"]>0).sum()
+    print(f"  {name:12}: {n_crossed:3} tracks, {n_multiple:2} recross, {n_uncross} uncross")
+
+##
+
+track_subs=[]
+for idx,row in df_with_crossings.iterrows():
+    t_min=np.nanmax( [row['top_of_array_last'],
+                      row['track']['tnum'].min()] )
+    # Ah - sj_lower_first is negative??
+    t_max=np.nanmin( [row['sj_lower_first'],
+                      row['hor_lower_first'],
+                      row['track']['tnum'].max()])
+    sel=( (t_min<=row['track']['tnum'].values)
+          & (row['track']['tnum'].values<=t_max ) )
+    track_sub=row['track'].iloc[sel,:].copy()
+    track_subs.append(track_sub)
+
+df_trim_crossings=df_with_crossings.copy()
+df_trim_crossings['track']=track_subs
+valid=np.array( [len(t)>0 for t in track_subs] )
+df_trim_crossings=df_trim_crossings.iloc[valid,:].copy()
+
+# 134 to 134 tracks
+print("Trimming to top_of_array -- lower gates: %d to %d tracks"%
+      (len(df_with_crossings),len(df_trim_crossings)))
+
+# Clean up some unused columns
+for col in ['id.1','index']:
+    if col in df_trim_crossings:
+        df_trim_crossings.drop(col,inplace=True,axis=1)
+
+##
+
+# Good time to think about predators
+# Can I establish a set of parameters that, either individually or together,
+# cluster predators and non-predators?
+
+df=df_trim_crossings
+
+for idx,row in df.iterrows():
+    track=row['track']
+    segs=track.iloc[:-1,:]
+    
+    # This is a bit noisy, though.
+    # what is the expected value of actual swim spd?
+    # see noise_study.py for some discussion of this,
+    # but no solution.
+    swim_spd=np.sqrt((segs['swim_u']**2 + segs['swim_v']**2))
+    dt=(segs['tnum_end']-segs['tnum']).values
+    assert np.all(dt>0)
+    assert np.all(np.isfinite(swim_spd*dt))
+    assert dt.sum()>0
+    
+    swim_spd_mean=(swim_spd*dt).sum() / dt.sum()
+    df.loc[idx,'swim_spd_mean']=swim_spd_mean
+
+    swim_spd_var=(swim_spd-swim_spd_mean)**2
+    df.loc[idx,'swim_spd_std']=np.sqrt( (swim_spd_var*dt).sum() / dt.sum() )
+    
+##
+
+plt.figure(14).clf()
+fig,ax=plt.subplots(num=14)
+ax.hist(df.swim_spd_mean,bins=25)
+ax.set_xlabel('Mean swimming speed per track (m/s)')
+fig.savefig('mean_swim_speed_per_track-v00.png')
+
+##
+plt.figure(15).clf()
+fig,ax=plt.subplots(num=15)
+
+sns.kdeplot(df.swim_spd_mean,df.swim_spd_std,
+            shade_lowest=True,
+            shade=True,
+            #linewidths=0.5,
+            levels=5,
+            ax=ax,zorder=1)
+ax.plot(df.swim_spd_mean, df.swim_spd_std, 'k.',ms=3,zorder=3)
+
+ax.set_xlabel('Mean swimming speed per track (m/s)')
+ax.set_ylabel('Std. dev. of swimming speed per track (m/s)')
+fig.savefig('stddev_swim_speed_per_track-v00.png')
+##
+
+plt.figure(16).clf()
+fig,ax=plt.subplots(num=16)
+
+sns.kdeplot(df.swim_spd_mean,df.duration_s/60.,
+            shade_lowest=True,
+            shade=True,
+            levels=5,
+            ax=ax,zorder=1)
+ax.plot(df.swim_spd_mean, df.duration_s/60., 'k.',ms=3,zorder=3)
+ax.axis(ymin=0,xmin=0)
+
+ax.set_xlabel('Mean swimming speed per track (m/s)')
+ax.set_ylabel('Duration of track (min)')
+fig.savefig('swim_speed_duration_per_track-v00.png')
+
+## 
+
+tagged_fish=pd.read_excel('../circulation/2018_Data/2018FriantTaggingCombined.xlsx')
+real_fish_tags=tagged_fish.TagID_Hex
+non_fish_tracks=~df.index.isin(real_fish_tags)
+
+print("Potential non-fish tag ids:",
+      " ".join(df.index.values[non_fish_tracks]) )
+
+##
+
+# Check for position error effect on mean speed.
+df['rms_pos_error']=df.track.apply( lambda t: np.sqrt( (t.x_sd**2 + t.y_sd**2).mean() ) )
+
+g=sns.jointplot(x=df.swim_spd_mean, y=df.rms_pos_error)
+g.set_axis_labels('Mean swim speed per track (m/s)',
+                  'RMS position error (m)')
+g.fig.savefig('swim_speed_rms_pos_error-v00.png')
+
+##
+
+# What tags have the highest mean swim speeds?
+fast_tags=np.argsort(df.swim_spd_mean.values)[-7:]
+print(df.iloc[fast_tags,:].loc[:,'swim_spd_mean'])
+
+##
+
+df=df_trim_crossings
+
+# Presumed predators:
+non_smolt = ['7A51','746D','74B4']
+
+smolt_sel = ~(df.index.isin(non_smolt))
+
+df_smolt=df.loc[smolt_sel,:].copy()
+
+print("Removed %d tracks as non-smolts, %d --> %d tracks"%
+      (len(non_smolt), len(df), len(df_smolt)))
+
+##
+
+track_common.dump_to_folder(df_smolt, 'screen_final')
