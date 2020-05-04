@@ -196,3 +196,44 @@ def gate_crossings(track,gates):
         
     return result
     
+def expand_to_regular(df,t,dt_nom=5.0,fields='all',fill=np.nan):
+    """
+    Infer missing time steps in data, replace with
+    fill value, or if 'interp', use linear interpolation
+    """
+    if fields=='all':
+        fields=df.columns.values
+        
+    t=np.asarray(t)
+    di=np.round(np.diff(t)/dt_nom).astype(np.int32)
+    assert di.min()>0
+    n_expand = di.sum()+1
+    tgts=np.r_[0,np.cumsum(di)]
+
+    valid=np.zeros(n_expand,np.bool8)
+    valid[tgts]=True
+
+    out=pd.DataFrame()
+    for f in fields:
+        f_out=np.nan*np.zeros(n_expand,np.float64)
+        f_out[valid]=df[f].values
+        if fill=='interp':
+            f_out[~valid] = np.interp(np.nonzero(~valid)[0],
+                                      tgts,df[f].values)
+        else:
+            f_out[~valid]=fill
+        out[f]=f_out
+    return out
+
+def set_direction_labels(ax):
+    ax.set_ylabel('Swim speed (m/s)')
+    ax.set_xlabel('Swim speed (m/s)')
+
+    bbox=dict(facecolor='w',lw=0.5)
+    common=dict(bbox=bbox,weight='bold',transform=ax.transAxes)
+
+    ax.text( 0.5, 1.0, 'Downstream',va='top',ha='center', **common)
+    ax.text( 0.5, 0.0, 'Upstream',  va='bottom',ha='center', **common)
+    ax.text( 0.0, 0.5, 'River\nLeft',va='center',ha='left',**common)
+    ax.text( 1.0, 0.5, 'River\nRight',  va='center',ha='right',**common)
+

@@ -3,3 +3,5 @@
 yaps
 *~
 __pycache__
+*.stan.pkl
+.directory

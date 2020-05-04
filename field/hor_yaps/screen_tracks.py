@@ -8,10 +8,13 @@ import glob
 import pandas as pd
 import numpy as np
 import track_common
+import matplotlib.pyplot as plt
+from stompy.spatial import wkb2shp
+import seaborn as sns
 
 ##
 
-fig_dir="figs20200406"
+fig_dir="figs20200411"
 if not os.path.exists(fig_dir):
     os.makedirs(fig_dir)
 
@@ -305,6 +308,10 @@ for col in ['id.1','index']:
     if col in df_trim_crossings:
         df_trim_crossings.drop(col,inplace=True,axis=1)
 
+##
+
+track_common.dump_to_folder( df_trim_crossings, 'with_nonsmolt')
+        
 ##
 
 # Good time to think about predators

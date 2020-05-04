@@ -3,8 +3,12 @@ from scipy import stats
 import os
 import track_common
 import seaborn as sns
+from stompy import memoize
+from stompy.io.local import cdec
+from scipy.stats.kde import gaussian_kde
+from scipy import signal 
 ##
-fig_dir="fig_analysis-20200411"
+fig_dir="fig_analysis-20200427"
 if not os.path.exists(fig_dir):
     os.makedirs(fig_dir)
 
@@ -18,6 +22,7 @@ df_start=track_common.read_from_folder('screen_final')
 t_min=df_start.track.apply( lambda t: t.tnum.min() )
 t_max=df_start.track.apply( lambda t: t.tnum.min() )
 t_mid=0.5*(t_min+t_max)
+df_start['t_mid']=t_mid
 tod_mid=(t_mid-7*3600)%86400. # PDT
 df_start['tod_mid_s']=tod_mid
 
@@ -25,6 +30,20 @@ tod_mid_angle=df_start.tod_mid_s/86400 * 2*np.pi
 df_start['tod_mid_angle_pdt']=tod_mid_angle
 
 df_start['tod_mid_octant']=1.5 + 3*np.floor(df_start['tod_mid_s']/(3*3600.))
+
+# Pattern of time-of-day and swim speed
+df_start['mean_swim_urel']=df_start.track.apply( lambda t: np.nanmean( t.swim_urel) )
+df_start['mean_swim_lateral']=df_start.track.apply( lambda t: np.nanmean( np.abs(t.swim_vrel)) )
+
+
+df_start['mean_gnd_urel']=df_start.track.apply( lambda t: np.nanmean( t.ground_urel) )
+df_start['mean_gnd_mag'] =df_start.track.apply( lambda t: np.nanmean( t.groundspeed) )
+
+for track in df_start.track.values:
+    track['model_mag']=np.sqrt(track.model_u_surf**2 + track.model_v_surf**2)
+    
+df_start['mean_model_mag']=df_start.track.apply( lambda t: np.nanmean( t.model_mag) )
+## 
 
 # spot check track 71A9, and the times work out. tod_mid is seconds
 # into the day, UTC.
@@ -112,13 +131,6 @@ fig.savefig(os.path.join(fig_dir,'diel-presence-bar.png'))
 
 ## 
 
-# Pattern of time-of-day and swim speed
-
-df_start['mean_swim_urel']=df_start.track.apply( lambda t: np.nanmean( t.swim_urel) )
-df_start['mean_swim_lateral']=df_start.track.apply( lambda t: np.nanmean( np.abs(t.swim_vrel)) )
-
-## 
-
 fig=plt.figure(32)
 fig.clf()
 ax=fig.add_subplot(111)
@@ -144,16 +156,160 @@ fig.savefig(os.path.join(fig_dir,'octant-swim_lateral.png'))
 
 ##
 
-df_start['mean_urel']=df_start.track.apply( lambda t: np.nanmean( t.urel) )
 
-## 
-
-fig=plt.figure(32)
+fig=plt.figure(34)
 fig.clf()
 ax=fig.add_subplot(111)
 
-# bin by 3 hour chunks
-sns.boxplot(x='tod_mid_octant',y='mean_swim_urel',data=df_start,ax=ax)
+sns.boxplot(x='tod_mid_octant',y='mean_gnd_urel',data=df_start,ax=ax)
 ax.set_xlabel('Middle of 3-hour bin (h)')
-ax.set_ylabel('Mean downstream swimming')
-fig.savefig(os.path.join(fig_dir,'octant-swim_urel.png'))
+ax.set_ylabel('Mean downstream groundspeed')
+fig.savefig(os.path.join(fig_dir,'octant-gnd_urel.png'))
+
+##
+
+fig=plt.figure(35)
+fig.clf()
+ax=fig.add_subplot(111)
+
+sns.boxplot(x='tod_mid_octant',y='mean_gnd_mag',data=df_start,ax=ax)
+ax.set_xlabel('Middle of 3-hour bin (h)')
+ax.set_ylabel('Mean groundspeed')
+fig.savefig(os.path.join(fig_dir,'octant-gnd_speed.png'))
+
+##
+
+
+fig=plt.figure(36)
+fig.clf()
+ax=fig.add_subplot(111)
+
+sns.boxplot(x='tod_mid_octant',y='mean_model_mag',data=df_start,ax=ax)
+ax.set_xlabel('Middle of 3-hour bin (h)')
+ax.set_ylabel('Mean water speed')
+fig.savefig(os.path.join(fig_dir,'octant-water_speed.png'))
+
+##
+@memoize.memoize(lru=10)
+def fetch_and_parse(local_file,url,**kwargs):
+    if not os.path.exists(local_file):
+        if not os.path.exists(os.path.dirname(local_file)):
+            os.makedirs(os.path.dirname(local_file))
+        utils.download_url(url,local_file,on_abort='remove')
+    return pd.read_csv(local_file,**kwargs)
+
+## 
+# longer time scale trends
+
+fig=plt.figure(37).clf()
+
+fig,(ax,ax_lat,ax2,ax_dens)=plt.subplots(4,1,sharex=True,num=37)
+fig.set_size_inches((9.5,9.0),forward=True)
+
+times=utils.unix_to_dt64(df_start.t_mid.values)
+ax.plot(times, df_start.mean_swim_urel, 'g.',label='Mean downstream swimming')
+ax_lat.plot(times, df_start.mean_swim_lateral, 'b.',label='Mean lateral swimming')
+ax.legend(loc='upper right')
+ax_lat.legend(loc='upper right')
+fig.autofmt_xdate()
+ax.axhline(0.0,color='0.6',lw=1.0)
+
+# MSD flows
+msd_flow=fetch_and_parse(local_file="env_data/msd/flow-2018.csv",
+                         url="http://wdl.water.ca.gov/waterdatalibrary/docs/Hydstra/docs/B95820Q/2018/FLOW_15-MINUTE_DATA_DATA.CSV",
+                         skiprows=3,parse_dates=['time'],names=['time','flow_cfs','quality','notes'])
+
+ax2.plot(msd_flow.time,msd_flow.flow_cfs,label='MSD Flow (cfs)')
+ax.axis(xmin=times.min(), xmax=times.max())
+
+msd_turb=cdec.cdec_dataset('MSD',times.min(),times.max(),sensor=27,
+                           cache_dir='env_data')
+msd_turb['turb_lp']=('time',),signal.medfilt(msd_turb.sensor0027.values,5)
+
+msd_tempF=cdec.cdec_dataset('MSD',times.min(),times.max(),sensor=25,
+                            cache_dir='env_data')
+
+ax_turb=ax2.twinx()
+ax_turb.plot(msd_turb.time,msd_turb.sensor0027,label='MSD Turb. (NTU)',color='orange',alpha=0.2,lw=0.4)
+ax_turb.plot(msd_turb.time,msd_turb.turb_lp,label='MSD Turb. (NTU)',color='orange')
+ax2.legend(handles=ax2.lines+ax_turb.lines)
+plt.setp(ax_turb.get_yticklabels(),color='orange')
+plt.setp(ax2.get_yticklabels(), color=ax2.lines[0].get_color())
+
+t=np.linspace(df_start.t_mid.min(),df_start.t_mid.max(),400)
+
+for bw in [None,0.05]:
+    kernel = stats.gaussian_kde(df_start.t_mid,bw_method=bw)
+    dens=kernel(t)
+    ax_dens.plot(utils.unix_to_dt64(t),kernel(t),label='KDE (bw=%s)'%bw)
+
+ax_dens.legend(loc='upper right')
+plt.setp(ax_dens.get_yticklabels(),visible=0)
+
+fig.tight_layout()
+
+# Nothing jumps out, except timimig 
+fig.savefig(os.path.join(fig_dir,'timeseries-swim_flow_turb.png'))
+
+##
+
+# Time of arrival vs. flow conditions
+fig=plt.figure(38).clf()
+
+fig,(ax_dens,ax2,ax_temp)=plt.subplots(3,1,sharex=True,num=38)
+fig.set_size_inches((9.5,9.0),forward=True)
+
+times=utils.unix_to_dt64(df_start.t_mid.values)
+t=np.linspace(df_start.t_mid.min(),df_start.t_mid.max(),400)
+
+for bw in [None,0.05]:
+    kernel = stats.gaussian_kde(df_start.t_mid,bw_method=bw)
+    dens=kernel(t)
+    ax_dens.plot(utils.unix_to_dt64(t),kernel(t),label='KDE (bw=%s)'%bw)
+
+ax_dens.plot(times,0*df_start.t_mid,'k+',label='Tag arrivals')
+    
+ax_dens.legend(loc='upper left')
+plt.setp(ax_dens.get_yticklabels(),visible=0)
+
+# ax.plot(times, df_start.mean_swim_urel, 'g.',label='Mean downstream swimming')
+# ax_lat.plot(times, df_start.mean_swim_lateral, 'b.',label='Mean lateral swimming')
+# ax.legend(loc='upper right')
+# ax_lat.legend(loc='upper right')
+# fig.autofmt_xdate()
+# ax.axhline(0.0,color='0.6',lw=1.0)
+
+# MSD flows
+msd_flow=fetch_and_parse(local_file="env_data/msd/flow-2018.csv",
+                         url="http://wdl.water.ca.gov/waterdatalibrary/docs/Hydstra/docs/B95820Q/2018/FLOW_15-MINUTE_DATA_DATA.CSV",
+                         skiprows=3,parse_dates=['time'],names=['time','flow_cfs','quality','notes'])
+
+ax2.plot(msd_flow.time,msd_flow.flow_cfs,label='MSD Flow (cfs)')
+ax_dens.axis(xmin=times.min(), xmax=times.max())
+
+msd_turb=cdec.cdec_dataset('MSD',times.min(),times.max(),sensor=27,
+                           cache_dir='env_data')
+msd_turb['turb_lp']=('time',),signal.medfilt(msd_turb.sensor0027.values,5)
+
+msd_temp=cdec.cdec_dataset('MSD',times.min(),times.max(),sensor=25,
+                           cache_dir='env_data')
+msd_temp['temp']=('time'), (msd_tempF['sensor0025']-32)*5./9
+
+ax_turb=ax2.twinx()
+ax_turb.plot(msd_turb.time,msd_turb.sensor0027,label='MSD Turb. (NTU)',color='orange',alpha=0.2,lw=0.4)
+ax_turb.plot(msd_turb.time,msd_turb.turb_lp,label='MSD Turb. (NTU)',color='orange')
+ax2.legend(handles=ax2.lines+ax_turb.lines,loc='upper left')
+plt.setp(ax_turb.get_yticklabels(),color='orange')
+plt.setp(ax2.get_yticklabels(), color=ax2.lines[0].get_color())
+
+ax_temp.plot(msd_temp.time,msd_temp.temp,label='MSD Temp ($^{\circ}$C)')
+ax_temp.legend(loc='upper left')
+
+fig.tight_layout()
+
+fig.savefig(os.path.join(fig_dir,'timeseries-arrival_flow_turb.png'))
+
+## 
+
+# And presence, swimming spatially -- look at screen_track_with_hydro
+# all_segs=
