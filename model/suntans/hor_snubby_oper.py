@@ -68,6 +68,7 @@ def base_model(run_dir,run_start,run_stop,
     if not model.restart:
         dt=0.25 # for lower friction run on refined shore grid
         model.config['dt']=dt
+        model.config['metmodel']=4 # wind only
 
         model.config['nonlinear']=1
 
@@ -79,7 +80,7 @@ def base_model(run_dir,run_start,run_stop,
             model.config['stairstep']=1 # 3D, stairstep
         
         model.config['thetaM']=-1
-        model.config['z0B']=0.001
+        model.config['z0B']=0.000001
         model.config['nu_H']=0.0
         model.config['nu']=1e-5
         model.config['turbmodel']=1 # 1: my25, 10: parabolic
@@ -102,12 +103,25 @@ def base_model(run_dir,run_start,run_stop,
         g=unstructured_grid.UnstructuredGrid.from_ugrid(grid_bathy)
         g.orient_edges()
         g.cells['z_bed'] += model.manual_z_offset
-        g.edges['edge_z_bed'] += model.manual_z_offset
-            
+        # Trying to smooth out pockets
+        z_bed_orig=g.cells['z_bed'].copy()
+        dz_quant=2.757155e-01 # approx. the current dz
+        z_bed_q=dz_quant*np.round(z_bed_orig/dz_quant)
+
+        for c in g.valid_cell_iter():
+            nbrs=[c]+ list(g.cell_to_cells(c))
+            if len(nbrs)%2==0:
+                nbrs.append(c)
+            g.cells['z_bed'][c]=np.median(z_bed_q[nbrs])
+
+        g.delete_edge_field('edge_z_bed')
+        #g.edges['edge_z_bed'] += model.manual_z_offset
+
         model.set_grid(g)
         model.grid.modify_max_sides(4)
     dt=float(model.config['dt'])
 
+    model.config['dzmin_surface']=0.01 # may have to bump this up..
     model.config['ntout']=int(1800./dt)
     model.config['ntoutStore']=int(3600./dt)
     # isn't this just duplicating the setting from above?
@@ -140,7 +154,7 @@ def base_model(run_dir,run_start,run_stop,
                                     filters=[dfm.Transform(fn=lambda x: x+model.manual_z_offset)])
 
     model.add_bcs([Q_upstream,Q_downstream,h_old_river])
-
+    
     model.write()
 
     assert np.all(np.isfinite(model.bc_ds.boundary_Q.values))
@@ -151,15 +165,38 @@ def base_model(run_dir,run_start,run_stop,
         # cfg007 used 0.1, and the shape was notably not as good
         # as steady008.
         # cfg008 will return to 0.5...
+        # BUT - now that I have more metrics in place, it looks like cfg007
+        # was actually better, in terms of MAE over top 2m, and smaller bias.
+        # with that in mind, steady012 will try an even smaller factor, and infact
+        # something more in line with Nikuradse.
         cell_z0B=0.5*model.grid.cells['bathy_rms']
         e2c=model.grid.edge_to_cells()
         nc1=e2c[:,0]
         nc2=e2c[:,1]
         nc2[nc2<0]=nc1[nc2<0]
-        edge_z0B=0.5*( cell_z0B[nc1] + cell_z0B[nc2] )
-        model.ic_ds['z0B']=('time','Ne'), edge_z0B[None,:]
-
+        # has been 0.1, 0.5, and even 1.0
+        # try going back to just a constant z0B
+        # edge_z0B=(1./30.)*( cell_z0B[nc1] + cell_z0B[nc2] )
+        # model.ic_ds['z0B']=('time','Ne'), edge_z0B[None,:]
         model.write_ic_ds()
+
+        # and how about some wind?
+        times=np.array( [model.run_start - np.timedelta64(10,'D'),
+                         model.run_start,
+                         model.run_stop,
+                         model.run_stop  + np.timedelta64(10,'D')] )
+        nt=len(times)
+        met_ds=model.zero_met(times=times)
+        pnts=model.grid.cells_center()[:1]
+        for comp in ['Uwind','Vwind']:
+            met_ds['x_'+comp]=("N"+comp,),pnts[:,0]
+            met_ds['y_'+comp]=("N"+comp,),pnts[:,1]
+            met_ds['z_'+comp]=("N"+comp,),10*np.ones_like(pnts[:,1])
+            
+        met_ds['Uwind']=('nt',"NUwind"), 0.0 * np.ones((nt,len(pnts)))
+        met_ds['Vwind']=('nt',"NVwind"),-5.0 * np.ones((nt,len(pnts)))
+        model.met_ds=met_ds
+        model.write_met_ds()
 
     model.partition()
     model.sun_verbose_flag='-v'

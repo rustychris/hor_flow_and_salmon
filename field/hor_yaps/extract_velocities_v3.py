@@ -29,9 +29,9 @@ import track_common
 import six
 six.moves.reload_module(track_common)
 
-if 0: # for fish tracks
+if 1: # for fish tracks
     df_in=track_common.read_from_folder('merged_v00')
-    output_path='mergedhydro_v00'
+    output_path='mergedhydro_v00_sun'
 else: # for ADCP data
     df_in=track_common.read_from_folder('adcp_2018')
     output_path='adcp_2018_hydro'
@@ -39,7 +39,7 @@ else: # for ADCP data
 col_in='track'
 col_out='track'
 
-use_ptm_output=True
+use_ptm_output=False
 
 if use_ptm_output:
     avg_fns=glob.glob("E:/Home/rustyh/SanJoaquin/model/suntans/cfg008/*/*.nc")
