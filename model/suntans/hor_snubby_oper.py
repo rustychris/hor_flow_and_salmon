@@ -68,7 +68,7 @@ def base_model(run_dir,run_start,run_stop,
     if not model.restart:
         dt=0.25 # for lower friction run on refined shore grid
         model.config['dt']=dt
-        model.config['metmodel']=4 # wind only
+        model.config['metmodel']=0 # 0: no wind, 4: wind only
 
         model.config['nonlinear']=1
 
@@ -79,8 +79,10 @@ def base_model(run_dir,run_start,run_stop,
             model.config['Nkmax']=50
             model.config['stairstep']=1 # 3D, stairstep
         
-        model.config['thetaM']=-1
+        # model.config['thetaM']=-1
+        model.config['thetaM']=-1 # with 1, seems to be unstable
         model.config['z0B']=0.000001
+        model.config['nonhydrostatic']=1 # too buggy.
         model.config['nu_H']=0.0
         model.config['nu']=1e-5
         model.config['turbmodel']=1 # 1: my25, 10: parabolic
@@ -122,7 +124,7 @@ def base_model(run_dir,run_start,run_stop,
     dt=float(model.config['dt'])
 
     model.config['dzmin_surface']=0.01 # may have to bump this up..
-    model.config['ntout']=int(1800./dt)
+    model.config['ntout']=int(600./dt) # just during testing
     model.config['ntoutStore']=int(3600./dt)
     # isn't this just duplicating the setting from above?
     model.z_offset=0.0 # moving away from the semi-automated datum shift to manual shift
@@ -131,8 +133,6 @@ def base_model(run_dir,run_start,run_stop,
 
     def fill(da):
         return utils.fill_tidal_data(da,fill_time=False)
-
-    # TODO: switch to water library for better QA
 
     if steady:
         # Would like to ramp these up at the very beginning.
@@ -143,13 +143,13 @@ def base_model(run_dir,run_start,run_stop,
         # could be too much friction, or too high BC.
         h_old_river=drv.StageBC(name='Old_River',z=1.75 + model.manual_z_offset)
     else:
-        Q_upstream=drv.CdecFlowBC(name="SJ_upstream",station="MSD",dredge_depth=None,
-                                  filters=[dfm.Transform(fn_da=fill)],
-                                  cache_dir=cache_dir)
+        data_upstream=common.msd_flow(self.run_start,self.run_stop)
+        Q_upstream=drv.FlowBC(name="SJ_upstream",Q=data_upstream.flow_m3s,dredge_depth=None)
+
+        data_downstream=common.sjd_flow(self.run_start,self.run_stop)
         # flip sign to get outflow.
-        Q_downstream=drv.CdecFlowBC(name="SJ_downstream",station="SJD",dredge_depth=None,
-                                    filters=[dfm.Transform(fn=lambda x: -x,fn_da=fill)],
-                                    cache_dir=cache_dir)
+        Q_downstream=drv.FlowBC(name="SJ_downstream",Q=-data_downstream.flow_m3s,dredge_depth=None)
+        
         h_old_river=drv.CdecStageBC(name='Old_River',station="OH1",cache_dir=cache_dir,
                                     filters=[dfm.Transform(fn=lambda x: x+model.manual_z_offset)])
 
@@ -180,23 +180,24 @@ def base_model(run_dir,run_start,run_stop,
         # model.ic_ds['z0B']=('time','Ne'), edge_z0B[None,:]
         model.write_ic_ds()
 
-        # and how about some wind?
-        times=np.array( [model.run_start - np.timedelta64(10,'D'),
-                         model.run_start,
-                         model.run_stop,
-                         model.run_stop  + np.timedelta64(10,'D')] )
-        nt=len(times)
-        met_ds=model.zero_met(times=times)
-        pnts=model.grid.cells_center()[:1]
-        for comp in ['Uwind','Vwind']:
-            met_ds['x_'+comp]=("N"+comp,),pnts[:,0]
-            met_ds['y_'+comp]=("N"+comp,),pnts[:,1]
-            met_ds['z_'+comp]=("N"+comp,),10*np.ones_like(pnts[:,1])
-            
-        met_ds['Uwind']=('nt',"NUwind"), 0.0 * np.ones((nt,len(pnts)))
-        met_ds['Vwind']=('nt',"NVwind"),-5.0 * np.ones((nt,len(pnts)))
-        model.met_ds=met_ds
-        model.write_met_ds()
+        if int(model.config['metmodel'])>=4:
+            # and how about some wind?
+            times=np.array( [model.run_start - np.timedelta64(10,'D'),
+                             model.run_start,
+                             model.run_stop,
+                             model.run_stop  + np.timedelta64(10,'D')] )
+            nt=len(times)
+            met_ds=model.zero_met(times=times)
+            pnts=model.grid.cells_center()[:1]
+            for comp in ['Uwind','Vwind']:
+                met_ds['x_'+comp]=("N"+comp,),pnts[:,0]
+                met_ds['y_'+comp]=("N"+comp,),pnts[:,1]
+                met_ds['z_'+comp]=("N"+comp,),10*np.ones_like(pnts[:,1])
+
+            met_ds['Uwind']=('nt',"NUwind"), 0.0 * np.ones((nt,len(pnts)))
+            met_ds['Vwind']=('nt',"NVwind"),-5.0 * np.ones((nt,len(pnts)))
+            model.met_ds=met_ds
+            model.write_met_ds()
 
     model.partition()
     model.sun_verbose_flag='-v'
