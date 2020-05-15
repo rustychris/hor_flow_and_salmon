@@ -20,6 +20,7 @@ import pandas as pd
 from stompy import filters, utils
 from stompy.spatial import wkb2shp, field
 from stompy.grid import unstructured_grid
+import common
 
 from stompy.model.suntans import sun_driver as drv
 import stompy.model.delft.dflow_model as dfm
@@ -82,7 +83,8 @@ def base_model(run_dir,run_start,run_stop,
         # model.config['thetaM']=-1
         model.config['thetaM']=-1 # with 1, seems to be unstable
         model.config['z0B']=0.000001
-        model.config['nonhydrostatic']=1 # too buggy.
+        # slow, doesn't make a huge difference, but does make w nicer.
+        model.config['nonhydrostatic']=0 
         model.config['nu_H']=0.0
         model.config['nu']=1e-5
         model.config['turbmodel']=1 # 1: my25, 10: parabolic
@@ -143,10 +145,10 @@ def base_model(run_dir,run_start,run_stop,
         # could be too much friction, or too high BC.
         h_old_river=drv.StageBC(name='Old_River',z=1.75 + model.manual_z_offset)
     else:
-        data_upstream=common.msd_flow(self.run_start,self.run_stop)
+        data_upstream=common.msd_flow(model.run_start,model.run_stop)
         Q_upstream=drv.FlowBC(name="SJ_upstream",Q=data_upstream.flow_m3s,dredge_depth=None)
 
-        data_downstream=common.sjd_flow(self.run_start,self.run_stop)
+        data_downstream=common.sjd_flow(model.run_start,model.run_stop)
         # flip sign to get outflow.
         Q_downstream=drv.FlowBC(name="SJ_downstream",Q=-data_downstream.flow_m3s,dredge_depth=None)
         
@@ -223,7 +225,8 @@ if __name__=='__main__':
     parser.add_argument("--interval",help="Interval for multiple shorter runs, e.g. 1D for 1 day",
                         default=None)
 
-    args=parser.parse_args()
+    args="-d runs/short036 -s 2018-04-05T12:00 -e 2018-04-05T16:00 ".split()
+    args=parser.parse_args(args=args)
     
     # range of tag data is
     # 2018-03-16 23:53:00 to 2018-04-11 14:11:00
@@ -276,7 +279,8 @@ if __name__=='__main__':
             except NameError:
                 script=None
             if script:
-                shutil.copyfile(script,os.path.join(model.run_dir,script))
+                shutil.copyfile(script,os.path.join(model.run_dir,
+                                                    os.path.basename(script)))
             else:
                 print("Could not copy script")
             if args.dryrun:
