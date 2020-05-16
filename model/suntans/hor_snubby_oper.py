@@ -82,9 +82,9 @@ def base_model(run_dir,run_start,run_stop,
         
         # model.config['thetaM']=-1
         model.config['thetaM']=-1 # with 1, seems to be unstable
-        model.config['z0B']=0.000001
+        model.config['z0B']=1e-6
         # slow, doesn't make a huge difference, but does make w nicer.
-        model.config['nonhydrostatic']=0 
+        model.config['nonhydrostatic']=1
         model.config['nu_H']=0.0
         model.config['nu']=1e-5
         model.config['turbmodel']=1 # 1: my25, 10: parabolic
@@ -107,16 +107,6 @@ def base_model(run_dir,run_start,run_stop,
         g=unstructured_grid.UnstructuredGrid.from_ugrid(grid_bathy)
         g.orient_edges()
         g.cells['z_bed'] += model.manual_z_offset
-        # Trying to smooth out pockets
-        z_bed_orig=g.cells['z_bed'].copy()
-        dz_quant=2.757155e-01 # approx. the current dz
-        z_bed_q=dz_quant*np.round(z_bed_orig/dz_quant)
-
-        for c in g.valid_cell_iter():
-            nbrs=[c]+ list(g.cell_to_cells(c))
-            if len(nbrs)%2==0:
-                nbrs.append(c)
-            g.cells['z_bed'][c]=np.median(z_bed_q[nbrs])
 
         g.delete_edge_field('edge_z_bed')
         #g.edges['edge_z_bed'] += model.manual_z_offset
@@ -225,7 +215,8 @@ if __name__=='__main__':
     parser.add_argument("--interval",help="Interval for multiple shorter runs, e.g. 1D for 1 day",
                         default=None)
 
-    args="-d runs/short036 -s 2018-04-05T12:00 -e 2018-04-05T16:00 ".split()
+    # args="-d runs/short036 -s 2018-04-05T12:00 -e 2018-04-05T16:00 ".split()
+    args=None
     args=parser.parse_args(args=args)
     
     # range of tag data is

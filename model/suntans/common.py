@@ -11,6 +11,7 @@ pad=np.timedelta64(1,'D')
 
 # Applied to WDL timestamps to get UTC
 wdl_raw_to_utc=lambda t: t+np.timedelta64(8,'h')
+max_gap_allowed_s=2.5*3600
 
 def get_wdl(start_date,end_date,local_file,url):
     local_path=os.path.join(cache_dir,local_file)
@@ -24,7 +25,11 @@ def get_wdl(start_date,end_date,local_file,url):
     assert start_date-pad > flow.time.values[0]
     assert end_date+pad < flow.time.values[-1]
     sel=(flow.time.values>=start_date-pad)&(flow.time.values<end_date+pad)
+    sel=sel&np.isfinite(flow.flow_m3s.values)
     flow=flow[sel]
+
+    max_gap=np.diff(flow.time.values).max() / np.timedelta64(1,'s')
+    assert max_gap<max_gap_allowed_s,"Max gap %s > allowable %s"%(max_gap, max_gap_allowed_s)
     
     flow_ds=xr.Dataset.from_dataframe(flow.set_index('time'))
     
