@@ -29,7 +29,9 @@ import grid_roughness
 
 ##
 
-with open('local_config.py') as fp:
+here=os.path.dirname(__file__)
+
+with open(os.path.join(here,'local_config.py')) as fp:
     exec(fp.read())
 
 ##
@@ -41,7 +43,7 @@ def base_model(run_dir,run_start,run_stop,
                steady=False):
     if restart_from is None:
         model=drv.SuntansModel()
-        model.load_template("sun-template.dat")
+        model.load_template(os.path.join(here,"sun-template.dat"))
         model.num_procs=num_procs
     else:
         old_model=drv.SuntansModel.load(restart_from)
@@ -95,8 +97,8 @@ def base_model(run_dir,run_start,run_stop,
 
         # 2019-07-11: refine near-shore swaths of grid, snubby-01 => snubby-04
         # 2019-07-12: further refinements 04 => 06
-        grid_src="../grid/snubby_junction/snubby-06.nc"
-        grid_bathy="snubby-with_bathy.nc"
+        grid_src=os.path.join(here,"../grid/snubby_junction/snubby-06.nc")
+        grid_bathy=os.path.join(here,"snubby-with_bathy.nc")
 
         if utils.is_stale(grid_bathy,[grid_src]):
             g_src=unstructured_grid.UnstructuredGrid.from_ugrid(grid_src)
@@ -121,7 +123,7 @@ def base_model(run_dir,run_start,run_stop,
     # isn't this just duplicating the setting from above?
     model.z_offset=0.0 # moving away from the semi-automated datum shift to manual shift
 
-    model.add_gazetteer("../grid/snubby_junction/forcing-snubby-01.shp")
+    model.add_gazetteer(os.path.join(here,"../grid/snubby_junction/forcing-snubby-01.shp"))
 
     def fill(da):
         return utils.fill_tidal_data(da,fill_time=False)
@@ -203,11 +205,9 @@ if __name__=='__main__':
     parser.add_argument("-e", "--end", help="Date of simulation stop",
                         default="2018-04-12")
     parser.add_argument("-d", "--dir", help="Run directory",
-                        default=None)
+                        default=None,required=True)
     parser.add_argument("-r", "--resume", help="Resume from run",
                         default=None)
-    parser.add_argument("-p", "--prefix", help="Prefix for naming set of runs",
-                        default="cfg006")
     parser.add_argument("-n", "--dryrun", help="Do not actually partition or run the simulation",
                         action='store_true')
     parser.add_argument("--steady",help="Use constant flows",
@@ -243,8 +243,7 @@ if __name__=='__main__':
         # in one go.
         run_interval=multi_run_stop-run_start
 
-    if args.dir is None:
-        args.dir="runs/" + args.prefix
+    assert args.dir is not None
         
     run_count=0
     last_run_dir=None
@@ -257,6 +256,8 @@ if __name__=='__main__':
         # cfg002: 3D
         # cfg003: fix grid topology in suntans, and timesteps
         # cfg004: run in one go, rather than daily restarts.
+        # cfg009: flows from WDL, very little friction, nonhydrostatic.
+        #         more reasonable dzmin_surface.
         
         run_dir=f"{args.dir}_{date_str}"
 
