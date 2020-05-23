@@ -95,17 +95,23 @@ def base_model(run_dir,run_start,run_stop,
 
         # 2019-07-11: refine near-shore swaths of grid, snubby-01 => snubby-04
         # 2019-07-12: further refinements 04 => 06
-        grid_src="../grid/snubby_junction/snubby-06.nc"
-        grid_bathy="snubby-with_bathy.nc"
+        #grid_src="../grid/snubby_junction/snubby-06.nc"
+        grid_src="../grid/snubby_junction/snubby-07-edit45.nc"
+        grid_bathy=os.path.basename(grid_src).replace('.nc',"-with_bathy.nc")
 
         if utils.is_stale(grid_bathy,[grid_src]):
             g_src=unstructured_grid.UnstructuredGrid.from_ugrid(grid_src)
+            bare_edges=g_src.orient_edges(on_bare_edge='return')
+            if len(bare_edges):
+                ec=g_src.edges_center()
+                for j in bare_edges[:50]:
+                    print("Bare edge: j=%d  xy=%g %g"%(j, ec[j,0], ec[j,1]))
+                raise Exception('Bare edges in grid')
             add_bathy.add_bathy(g_src)
             grid_roughness.add_roughness(g_src)
             g_src.write_ugrid(grid_bathy,overwrite=True)
             
         g=unstructured_grid.UnstructuredGrid.from_ugrid(grid_bathy)
-        g.orient_edges()
         g.cells['z_bed'] += model.manual_z_offset
 
         g.delete_edge_field('edge_z_bed')
