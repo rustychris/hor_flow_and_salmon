@@ -5,8 +5,10 @@ Had been in the grid directory, but moved here for quicker edit-run cycles
 from stompy import utils
 from stompy.grid import unstructured_grid
 import numpy as np
+import os
 
-utils.path("../../bathy")
+utils.path(os.path.join(os.path.dirname(__file__),
+                        "../../bathy"))
 import bathy
 
 def add_bathy(g):
