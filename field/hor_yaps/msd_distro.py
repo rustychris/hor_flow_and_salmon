@@ -115,4 +115,43 @@ sns.boxplot(x='t_bin',y='msd_y',data=msd_data,ax=ax_box_y)
 sns.boxplot(x='t_bin',y='msd',data=msd_data,ax=ax_box)
 
 fig.tight_layout()
-fig.savefig(os.path.join(fig_dir,'swim_progressive_vector.png'))
+# fig.savefig(os.path.join(fig_dir,'swim_progressive_vector.png'))
+
+##
+
+# Limit to tracks > 1000s, and only plot that much of the track
+
+num=21
+fig=plt.figure(num)
+fig.set_size_inches((4,8),forward=True)
+fig.clf()
+ax_swim=fig.add_subplot(1,1,1)
+
+cutoff=800.0
+ends=[]
+for ti in range(len(df)):
+    track=df['track'][ti]
+    t=track.tnum.values
+    duration=t.max() - t.min()
+    if duration<cutoff:
+        continue
+    sel=(t-t.min()<=cutoff)
+    print(ti)
+    # Plot with the same orientation as the swim speed distribution
+    # figures
+    ax_swim.plot(-track['swim_y'].values[sel],
+                 track['swim_x'].values[sel],
+                 color=turbo(ti/float(len(df)-1)))
+    ends.append( [-track['swim_y'].values[sel][-1],
+                  track['swim_x'].values[sel][-1]])
+
+ax_swim.axis('equal')
+
+ax_swim.axhline(0,color='k',lw=0.5)
+ax_swim.axvline(0,color='k',lw=0.5)
+
+ends=np.array(ends)
+ax_swim.plot(ends[:,0],ends[:,1],'ko')
+
+fig.tight_layout()
+fig.savefig(os.path.join(fig_dir,'swim_progressive_vector_lim800.png'))

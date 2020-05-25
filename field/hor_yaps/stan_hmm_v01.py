@@ -45,7 +45,10 @@ segs=track[:-1]
 
 data=dict(K=3)
 
-data['spd_beta']=[100.0]*data['K'] # rate for speed gamma distros. would like to fit this, too.
+# seems this should be ~25, but that tends to overpower heading
+data['spd_beta']=4.0*np.ones(data['K']) # rate for speed gamma distros. would like to fit this, too.
+data['spd_beta'][0]=30.0
+data['spd_beta'][-1]=30.0
 data['alpha']=5*np.eye(data['K']) + 1.
 
 import six
@@ -106,17 +109,6 @@ if 1: # expanded, lowpassed data
     data['geo_x']=geo_x[1:-1][::stride]
     data['geo_y']=geo_y[1:-1][::stride]
     data['t']=t[1:-1][::stride]
-else:
-    # original data, forget that it's not regular
-    data['N']=len(segs)-1
-    # keeps time centering the same for swim speed and turn angle
-    data['u']=0.5*(segs['swim_speed'].values[:-1] +
-                   segs['swim_speed'].values[1:]),
-    data['v']=np.diff(segs['swim_hdg_rel'].values),
-    data['geo_x']=segs['x_m'][:-1]
-    data['geo_y']=segs['y_m'][:-1]
-    data['swim_x']=segs['swim_x'][:-1]
-    data['swim_y']=segs['swim_y'][:-1]
     
 # So the usual moveHMM approach
 # is using step length, and change in heading.
@@ -134,6 +126,8 @@ def load_model(model_file):
     return sm
 
 class show_model(object):
+    cmap_state=cm.Dark2
+    
     def __init__(self,sm,opt,data):
         self.nparam=len(self.params)
         self.sm=sm
@@ -167,7 +161,7 @@ class show_model(object):
             print(f"State {k} {100*freq:4.1f}%: {param_str}")
             
 class show_model_01(show_model):
-    params=['speed','turn']
+    params=['Swim speed','Turn angle']
 
     def parameter_string(self,k):
         opt=self.opt
@@ -186,7 +180,7 @@ class show_model_01(show_model):
         ax_swim=fig.add_subplot(gs[self.nparam:,0])
 
         for k in range(self.data['K']):
-            color=cm.Accent.colors[k]
+            color=self.cmap_state.colors[k]
             sel=(opt['z_star']-1==k)
             ax_geo.plot(  data['geo_x'][sel],   data['geo_y'][sel],  'o', color=color)
             ax_swim.plot( -data['swim_y'][sel], data['swim_x'][sel], 'o', color=color)
@@ -197,7 +191,7 @@ class show_model_01(show_model):
         for p in range(self.nparam):
             ax=fig.add_subplot(gs[2*p:2*(p+1),1])
             for k in range(data['K']):
-                color=cm.Accent.colors[k]
+                color=self.cmap_state.colors[k]
                 self.plot_parameter(p=p,k=k,ax=ax,color=color)
             ax.legend(loc='upper right',title=self.params[p])
         self.fig=fig
@@ -227,7 +221,7 @@ if 0:
     # use only angle distribution (tau>0.25) or only speeds (tau<0.2) states.
 
 class show_model_02(show_model_01):
-    params=show_model_01.params + ['hdg']
+    params=show_model_01.params + ['Geog. Heading']
     def parameter_string(self,k):
         opt=self.opt
         data=self.data
@@ -243,11 +237,26 @@ class show_model_02(show_model_01):
                                                kappa=self.opt['hdg_conc'][k]),
                      label=f'State {k+1}',color=color)
         
-sm=load_model('stan_hmm_v02.stan')
+# sm=load_model('stan_hmm_v02.stan')
+sm=load_model('stan_hmm_v03.stan')
 opt=sm.optimizing(data=data)
 show_model_02(sm,opt,data)
 
 ##
+
+# Effective sampling will require a stronger control
+# on which states are which
+samples=sm.sampling(data=data)
+
+##
+
+
+# Manually tweaking a gamma to match the global distribution
+# of velocities suggests beta~25
 plt.figure(10).clf()
-plt.hist( data['hdg'],bins=np.linspace(-np.pi,np.pi,51))
+
+plt.hist(data['u'],40,density=1)
+x=np.linspace(0,1.25,200)
+plt.plot( x, stats.gamma(8,scale=1./25).pdf(x) )
+plt.plot( x, stats.norm(0.27,0.07).pdf(x) )
 

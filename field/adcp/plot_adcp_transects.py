@@ -31,32 +31,32 @@ def tweak_sontek(ds):
     return ds
 
 # Data from each set of repeats is in a single folder
-# 2018 data:
-# transect_dirs=glob.glob("040518_BT/*BTref")
-# 2019 data:
-transect_dirs=["DAV_Transects_2019/Processed DAV 2019/JCT",
-               "DAV_Transects_2019/Processed DAV 2019/OR1",
-               "DAV_Transects_2019/Processed DAV 2019/SJD1",
-               "DAV_Transects_2019/Processed DAV 2019/SJD2",
-               "DAV_Transects_2019/Processed DAV 2019/SJD3",
-               "DAV_Transects_2019/Processed DAV 2019/SJU01",
-               "DAV_Transects_2019/Processed DAV 2019/SJU02",
-               "DAV_Transects_2019/Processed DAV 2019/SJU03",
-               "DAV_Transects_2019/Processed DAV 2019/SJU04",
-               "DAV_Transects_2019/Processed DAV 2019/SJU05",
-               "DAV_Transects_2019/Processed DAV 2019/SJU06",
-               "DAV_Transects_2019/Processed DAV 2019/SJU07",
-               ]
+if 1: # 2018 data:
+    transect_dirs=glob.glob("040518_BT/*BTref")
+else: # 2019 data:
+    transect_dirs=["DAV_Transects_2019/Processed DAV 2019/JCT",
+                   "DAV_Transects_2019/Processed DAV 2019/OR1",
+                   "DAV_Transects_2019/Processed DAV 2019/SJD1",
+                   "DAV_Transects_2019/Processed DAV 2019/SJD2",
+                   "DAV_Transects_2019/Processed DAV 2019/SJD3",
+                   "DAV_Transects_2019/Processed DAV 2019/SJU01",
+                   "DAV_Transects_2019/Processed DAV 2019/SJU02",
+                   "DAV_Transects_2019/Processed DAV 2019/SJU03",
+                   "DAV_Transects_2019/Processed DAV 2019/SJU04",
+                   "DAV_Transects_2019/Processed DAV 2019/SJU05",
+                   "DAV_Transects_2019/Processed DAV 2019/SJU06",
+                   "DAV_Transects_2019/Processed DAV 2019/SJU07",
+                   ]
 
 force=True
-write_nc=False
-write_shp=True
-shp_fn="../../gis/transects_2019.shp"
+write_nc=True
+write_shp=False
+#shp_fn="../../gis/transects_2019.shp"
 
 geoms=[]
 
 for transect_dir in transect_dirs:
-    avg_fn=transect_dir+'-avg.nc'
+    avg_fn=transect_dir+'-avg_with_time.nc'
 
     rivr_fns=glob.glob('%s/*.rivr'%transect_dir) + glob.glob('%s/*.riv'%transect_dir)
     assert len(rivr_fns)
@@ -95,8 +95,6 @@ for transect_dir in transect_dirs:
         for ds in tran_dss():
             geoms.append( geometry.LineString( np.c_[ ds.x_sample.values,
                                                       ds.y_sample.values ] ) )
-
-
 ##
 if write_shp:
     wkb2shp.wkb2shp(shp_fn,geoms)
