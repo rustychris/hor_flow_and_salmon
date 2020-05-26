@@ -1,0 +1,11 @@
+ snubby-06.nc
+  -- used this for a long time.
+ snubby-07-edit45.nc
+  -- last of an attempt to bump up resolution, and have a "nicer" almost entirely
+     quad grid.  Result was slow, fairly stable, but calibration was worse.
+ snubby-08-edit01.nc
+  -- pull a snubby-07 edit at the point where extraneous cells of snubby-06
+     were trimmed, but before massive topo editing.  Will go from there, fix up
+     a few bad cells, and try some runs.
+     
+
