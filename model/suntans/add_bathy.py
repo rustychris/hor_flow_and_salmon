@@ -11,8 +11,8 @@ utils.path(os.path.join(os.path.dirname(__file__),
                         "../../bathy"))
 import bathy
 
-def add_bathy(g):
-    dem=bathy.dem()
+def add_bathy(g,suffix=''):
+    dem=bathy.dem(suffix=suffix)
 
     def eval_pnts(x):
         z=dem(x)

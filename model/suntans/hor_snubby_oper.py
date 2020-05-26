@@ -69,7 +69,10 @@ def base_model(run_dir,run_start,run_stop,
         ramp_hours=0
 
     if not model.restart:
-        dt=0.25 # for lower friction run on refined shore grid
+        # dt=0.25 # for lower friction run on refined shore grid
+        # with new grid that's deformed around the barrier can probably
+        # get away with 0.5
+        dt=0.5 # for lower friction run on refined shore grid
         model.config['dt']=dt
         model.config['metmodel']=0 # 0: no wind, 4: wind only
 
@@ -86,7 +89,7 @@ def base_model(run_dir,run_start,run_stop,
         model.config['thetaM']=-1 # with 1, seems to be unstable
         model.config['z0B']=1e-6
         # slow, doesn't make a huge difference, but does make w nicer.
-        model.config['nonhydrostatic']=1
+        model.config['nonhydrostatic']=0
         model.config['nu_H']=0.0
         model.config['nu']=1e-5
         model.config['turbmodel']=1 # 1: my25, 10: parabolic
@@ -98,8 +101,14 @@ def base_model(run_dir,run_start,run_stop,
         # 2019-07-11: refine near-shore swaths of grid, snubby-01 => snubby-04
         # 2019-07-12: further refinements 04 => 06
         #grid_src="../grid/snubby_junction/snubby-06.nc"
-        grid_src="../grid/snubby_junction/snubby-07-edit45.nc"
-        grid_bathy=os.path.basename(grid_src).replace('.nc',"-with_bathy.nc")
+        #grid_src="../grid/snubby_junction/snubby-07-edit45.nc"
+        #grid_src="../grid/snubby_junction/snubby-08-edit06.nc" # this was pretty good.
+        grid_src="../grid/snubby_junction/snubby-08-edit24.nc"
+
+        #bathy_suffix=''
+        bathy_suffix='adcp'
+
+        grid_bathy=os.path.basename(grid_src).replace('.nc',f"-with_bathy{bathy_suffix}.nc")
 
         if utils.is_stale(grid_bathy,[grid_src]):
             g_src=unstructured_grid.UnstructuredGrid.from_ugrid(grid_src)
@@ -109,7 +118,7 @@ def base_model(run_dir,run_start,run_stop,
                 for j in bare_edges[:50]:
                     print("Bare edge: j=%d  xy=%g %g"%(j, ec[j,0], ec[j,1]))
                 raise Exception('Bare edges in grid')
-            add_bathy.add_bathy(g_src)
+            add_bathy.add_bathy(g_src,suffix=bathy_suffix)
             grid_roughness.add_roughness(g_src)
             g_src.write_ugrid(grid_bathy,overwrite=True)
             
@@ -123,7 +132,8 @@ def base_model(run_dir,run_start,run_stop,
         model.grid.modify_max_sides(4)
     dt=float(model.config['dt'])
 
-    model.config['dzmin_surface']=0.01 # may have to bump this up..
+    # with 0.01, was getting many CmaxW problems.
+    model.config['dzmin_surface']=0.05 # may have to bump this up..
     model.config['ntout']=int(600./dt) # just during testing
     model.config['ntoutStore']=int(3600./dt)
     # isn't this just duplicating the setting from above?
@@ -149,9 +159,10 @@ def base_model(run_dir,run_start,run_stop,
         data_downstream=common.sjd_flow(model.run_start,model.run_stop)
         # flip sign to get outflow.
         Q_downstream=drv.FlowBC(name="SJ_downstream",Q=-data_downstream.flow_m3s,dredge_depth=None)
-        
-        h_old_river=drv.CdecStageBC(name='Old_River',station="OH1",cache_dir=cache_dir,
-                                    filters=[dfm.Transform(fn=lambda x: x+model.manual_z_offset)])
+
+        or_stage=common.oh1_stage(model.run_start,model.run_stop)
+        h_old_river=drv.StageBC(name='Old_River',z=or_stage.stage_m,
+                                filters=[dfm.Transform(fn=lambda x: x+model.manual_z_offset)])
 
     model.add_bcs([Q_upstream,Q_downstream,h_old_river])
     
