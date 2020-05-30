@@ -72,7 +72,8 @@ def base_model(run_dir,run_start,run_stop,
         # dt=0.25 # for lower friction run on refined shore grid
         # with new grid that's deformed around the barrier can probably
         # get away with 0.5
-        dt=0.5 # for lower friction run on refined shore grid
+        #dt=0.5 # for lower friction run on refined shore grid
+        dt=0.25 # bit of safety for high res grid.
         model.config['dt']=dt
         model.config['metmodel']=0 # 0: no wind, 4: wind only
 
@@ -87,7 +88,7 @@ def base_model(run_dir,run_start,run_stop,
         
         # model.config['thetaM']=-1
         model.config['thetaM']=-1 # with 1, seems to be unstable
-        model.config['z0B']=1e-6
+        model.config['z0B']=5e-3 # maybe with ADCP bathy need more friction
         # slow, doesn't make a huge difference, but does make w nicer.
         model.config['nonhydrostatic']=0
         model.config['nu_H']=0.0
@@ -103,7 +104,8 @@ def base_model(run_dir,run_start,run_stop,
         #grid_src="../grid/snubby_junction/snubby-06.nc"
         #grid_src="../grid/snubby_junction/snubby-07-edit45.nc"
         #grid_src="../grid/snubby_junction/snubby-08-edit06.nc" # this was pretty good.
-        grid_src="../grid/snubby_junction/snubby-08-edit24.nc"
+        #grid_src="../grid/snubby_junction/snubby-08-edit24.nc"
+        grid_src="../grid/snubby_junction/snubby-08-edit50.nc" # high res in hole
 
         #bathy_suffix=''
         bathy_suffix='adcp'
