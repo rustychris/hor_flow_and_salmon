@@ -107,8 +107,11 @@ def base_model(run_dir,run_start,run_stop,
 
         #bathy_suffix=''
         bathy_suffix='adcp'
+        # on-grid bathy postprocessesing:
+        # post_suffix=''
+        post_suffix='med0'
 
-        grid_bathy=os.path.basename(grid_src).replace('.nc',f"-with_bathy{bathy_suffix}.nc")
+        grid_bathy=os.path.basename(grid_src).replace('.nc',f"-with_bathy{bathy_suffix}{post_suffix}.nc")
 
         if utils.is_stale(grid_bathy,[grid_src]):
             g_src=unstructured_grid.UnstructuredGrid.from_ugrid(grid_src)
@@ -119,7 +122,10 @@ def base_model(run_dir,run_start,run_stop,
                     print("Bare edge: j=%d  xy=%g %g"%(j, ec[j,0], ec[j,1]))
                 raise Exception('Bare edges in grid')
             add_bathy.add_bathy(g_src,suffix=bathy_suffix)
+            add_bathy.postprocess(g_src,post_suffix=post_suffix)
+            
             grid_roughness.add_roughness(g_src)
+
             g_src.write_ugrid(grid_bathy,overwrite=True)
             
         g=unstructured_grid.UnstructuredGrid.from_ugrid(grid_bathy)
