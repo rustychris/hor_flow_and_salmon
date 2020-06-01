@@ -118,8 +118,15 @@ d_med=d_orig.copy()
 
 for c in utils.progress(g.valid_cell_iter()):
     # Get a large-ish neighborhood:
-    nbrs=np.array(g.select_cells_nearest( cc[c], count=200))
+    # Would like to make this a length scale to be more grid invariant
+    # nbrs=np.array(g.select_cells_nearest( cc[c], count=200))
+    L=35
+    nbrs=np.nonzero( utils.mag( cc-cc[c])<L)[0]
 
+    # what does this typically look like in terms of radius?
+    dist2=utils.mag( cc[nbrs]-cc[c] )
+    # print('Max dist: ',dist2.max())
+    
     alpha=10 # controls the degree of anistropy
     coords=np.c_[ cc[nbrs], alpha*psi[nbrs]]
     coord0=np.array( [ cc[c,0],cc[c,1],alpha*psi[c] ] )
