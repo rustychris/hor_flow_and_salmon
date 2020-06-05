@@ -12,6 +12,8 @@ import xarray as xr
 ##
 
 dem=field.GdalGrid('junction-composite-20190117-no_adcp.tif')
+
+dem_adcp=field.GdalGrid('junction-composite-dem.tif')
 ## 
 
 adcp_data=wkb2shp.shp2geom('derived/samples-depth.shp',target_srs='EPSG:26910')
@@ -39,6 +41,19 @@ scat=ax.scatter(adcp_ds.x,adcp_ds.y,20,delta,cmap='coolwarm')
 scat.set_clim([-0.75,0.75])
 
 plt.colorbar(scat,ax=ax,orientation='horizontal',label='dem - adcp')
+
+ax.axis('equal')
+ax.axis(zoom)
+
+##
+
+# And difference between the ADCP interpolated bathy 
+dem_delta=field.SimpleGrid(extents=dem_adcp.extents,F=dem_adcp.F-dem.F)
+
+plt.figure(11).clf()
+fig,ax=plt.subplots(num=11)
+img=dem_delta.plot(cmap='coolwarm',clim=[-1,1])
+plt.colorbar(img,ax=ax,orientation='horizontal',label='dem_adcp - dem_dwr')
 
 ax.axis('equal')
 ax.axis(zoom)
