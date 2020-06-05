@@ -75,3 +75,17 @@ def oh1_stage(start_date,end_date):
                             "docs/B95400/2018/STAGE_15-MINUTE_DATA_DATA.CSV") )
     return flow
 
+# BROKEN
+def sjd_stage(start_date,end_date):
+    flow=get_wdl_stage(start_date,end_date,
+                      local_file="sjd-stage-2018.csv",
+                      url=("http://wdl.water.ca.gov/waterdatalibrary/docs/Hydstra/"
+                           "docs/B95760/2018/STAGE_15-MINUTE_DATA_DATA.CSV") )
+    return flow
+
+def msd_stage(start_date,end_date):
+    flow=get_wdl_stage(start_date,end_date,
+                      local_file="msd-stage-2018.csv",
+                      url=("http://wdl.water.ca.gov/waterdatalibrary/docs/Hydstra/"
+                           "docs/B95820/2018/STAGE_15-MINUTE_DATA_DATA.CSV") )
+    return flow
