@@ -10,7 +10,7 @@ import glob, os
 import matplotlib
 import shutil
 import glob
-matplotlib.use('Agg')
+# matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from scipy.interpolate import LinearNDInterpolator
 
@@ -70,7 +70,9 @@ if use_ptm_output:
     run_starts=[nc['time'].values[0] for nc in avg_ncs]    
 else:                          
     # This time with proper friction
-    mod=sun_driver.SuntansModel.load('/opt2/san_joaquin/cfg008/cfg008_20180409')
+    # mod=sun_driver.SuntansModel.load('/opt2/san_joaquin/cfg008/cfg008_20180409')
+    # New run, attached via USB to laptop:
+    mod=sun_driver.SuntansModel.load('/media/rusty/80c8a8ec-71d2-4687-aa6b-41c23f557be8/san_joaquin/cfg010/cfg010_20180409')
     
     seq=mod.chain_restarts()
     run_starts=np.array([mod.run_start for mod in seq])
@@ -140,24 +142,13 @@ def smoother():
     ug=ug_for_run(run_i=0)
     return ug.grid.smooth_matrix(f=0.5)
 
-@memoize.memoize(lru=20)
-def depth_avg(run_i,t_i):
-    ug=ug_for_run(run_i)
-    #time_idx=utils.nearest(ug.nc.time.values, t)
-    # have to transpose as the velocities have Nk first, but
-    # this defaults to Nk second
-    return ug.vertical_averaging_weights(time_slice=t_i,ztop=0,zbottom=0).T
 
-@memoize.memoize(lru=20)
-def surf_50cm(run_i,t_i):
+@memoize.memoize(lru=60)
+def z_average_weights(run_i,t_i,ztop=None,zbottom=None,dz=None):
     ug=ug_for_run(run_i)
-    #time_idx=utils.nearest(ug.nc.time.values, t)
-    # have to transpose as the velocities have Nk first, but
-    # this defaults to Nk second
-    return ug.vertical_averaging_weights(time_slice=t_i,ztop=0,dz=0.5).T
+    return ug.vertical_averaging_weights(time_slice=t_i,ztop=ztop,zbottom=zbottom,dz=dz).T
 
-#eps=0.5 # finite difference length scale
-eps=2.0
+eps=2.0 # finite difference length scale
 
 from scipy.spatial import Delaunay
 
@@ -178,8 +169,8 @@ def quantize_time(t):
         time_idx=utils.nearest(ug.nc.time.values, t)
     return run_i,time_idx
 
-@memoize.memoize(lru=20)
-def interpolator(run_i,t_i):
+@memoize.memoize(lru=60)
+def interpolator(run_i,t_i,ztop=None,zbottom=None,dz=None):
     """
     Returns a function that takes [...,2] coordinate arrays on 
     input, and for the nearest time step of output spatially
@@ -195,8 +186,8 @@ def interpolator(run_i,t_i):
     # Initialize the fields we'll be filling in
     z_eta=snap['eta'].values
 
-    # depth average
-    weights=depth_avg(run_i,t_i)
+    # depth average, or subset thereof
+    weights=z_average_weights(run_i,t_i,ztop=ztop,zbottom=zbottom,dz=dz)
     u3d=snap.uc.values
     v3d=snap.vc.values
     u2d=np.where(np.isnan(u3d),0,weights*u3d).sum(axis=0)
@@ -204,34 +195,16 @@ def interpolator(run_i,t_i):
     values=np.c_[u2d,v2d,z_eta,z_bed]
     return LinearNDInterpolator(pnts, values)
 
-@memoize.memoize(lru=20)
-def surf_interpolator(run_i,t_i):
-    """
-    Returns a function that takes [...,2] coordinate arrays on 
-    input, and for the nearest time step of output spatially
-    interpolates uc,vc integrated over the top 50cm of the
-    watercolumn
-    """
-    ug=ug_for_run(run_i)
-    snap=snap_for_time(run_i,t_i)
-    pnts=pnts_for_interpolator()
-    
-    # top 50cm
-    weights=surf_50cm(run_i,t_i)
-    u3d=snap.uc.values
-    v3d=snap.vc.values
-    u2d=np.where(np.isnan(u3d),0,weights*u3d).sum(axis=0)
-    v2d=np.where(np.isnan(v3d),0,weights*v3d).sum(axis=0)
-    values=np.c_[u2d,v2d]
-    return LinearNDInterpolator(pnts, values)
-
 ##
 
 if not os.path.exists(output_path):
     os.makedirs(output_path)
 
-
 results=[]
+
+z_slices=[('_top1m',dict(ztop=0,dz=1.0)),
+          ('_top2m',dict(ztop=0,dz=2.0)),
+          ('_davg',dict(ztop=0,zbottom=0))]
 
 for idx,row in df_in.iterrows(): #track_fn in track_fns:
     #output_fn=os.path.join(output_path,os.path.basename(track_fn))
@@ -257,39 +230,32 @@ for idx,row in df_in.iterrows(): #track_fn in track_fns:
         rec={} # new fields to be added to segments.
         t=seg['time_m'].to_datetime64()
         run_i,t_i=quantize_time(t)
-        # snap=snap_for_time(run_i,t_i)
-
-        Uint=interpolator(run_i,t_i)
-        
-        # vorticity at centers
-        x_samp=np.array( [ [seg['x_m']    , seg['y_m']      ],
-                           [seg['x_m']-eps, seg['y_m']      ],
-                           [seg['x_m']+eps, seg['y_m']      ],
-                           [seg['x_m']    , seg['y_m'] - eps],
-                           [seg['x_m']    , seg['y_m'] + eps]
-        ] )
-
-        u=Uint(x_samp)
-        u=np.where(np.isfinite(u),u,0)
-        # central differencing
-        w=(u[2,1]-u[1,1])/(2*eps) - (u[4,0]-u[3,0])/(2*eps)
 
         rec['index']=i
-        rec['model_vor']=w
-        rec['model_u']=u[0,0]
-        rec['model_v']=u[0,1]
+
+        for slice_name,slice_def in z_slices:
+            Uint=interpolator(run_i,t_i,**slice_def)
+        
+            # vorticity at centers
+            x_samp=np.array( [ [seg['x_m']    , seg['y_m']      ],
+                               [seg['x_m']-eps, seg['y_m']      ],
+                               [seg['x_m']+eps, seg['y_m']      ],
+                               [seg['x_m']    , seg['y_m'] - eps],
+                               [seg['x_m']    , seg['y_m'] + eps]
+            ] )
+
+            u=Uint(x_samp)
+            u=np.where(np.isfinite(u),u,0)
+            # central differencing
+            #  dv/dx - du/dy
+            w=(u[2,1]-u[1,1])/(2*eps) - (u[4,0]-u[3,0])/(2*eps)
+
+            rec['model_vor'  +slice_name]=w
+            rec['model_u'    +slice_name]=u[0,0]
+            rec['model_v'    +slice_name]=u[0,1]
+        
         rec['model_z_eta']=u[0,2]
         rec['model_z_bed']=u[0,3]
-
-        Usurf=surf_interpolator(run_i,t_i)
-        u=Usurf(x_samp)
-        u=np.where(np.isfinite(u),u,0)
-        # central differencing
-        w=(u[2,1]-u[1,1])/(2*eps) - (u[4,0]-u[3,0])/(2*eps)
-
-        rec['model_vor_surf']=w
-        rec['model_u_surf']=u[0,0]
-        rec['model_v_surf']=u[0,1]
 
         new_records.append(rec)
 

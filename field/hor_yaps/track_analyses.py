@@ -1,21 +1,32 @@
 import matplotlib.pyplot as plt
 from scipy import stats
+import numpy as np
 import os
 import track_common
 import seaborn as sns
-from stompy import memoize
+from stompy import memoize, utils
+import pandas as pd
 from stompy.io.local import cdec
 from scipy.stats.kde import gaussian_kde
 from scipy import signal 
 ##
-fig_dir="fig_analysis-20200427"
+
+vel_suffix='_top2m'
+
+fig_dir="fig_analysis-20200620"+vel_suffix
 if not os.path.exists(fig_dir):
     os.makedirs(fig_dir)
 
 ## 
 df_start=track_common.read_from_folder('screen_final')
 
+
 ##
+
+df_start['track'].apply(track_common.calc_velocities,
+                        model_u='model_u'+vel_suffix,
+                        model_v='model_v'+vel_suffix)
+
 
 # Day-night variability
 
@@ -40,7 +51,8 @@ df_start['mean_gnd_urel']=df_start.track.apply( lambda t: np.nanmean( t.ground_u
 df_start['mean_gnd_mag'] =df_start.track.apply( lambda t: np.nanmean( t.groundspeed) )
 
 for track in df_start.track.values:
-    track['model_mag']=np.sqrt(track.model_u_surf**2 + track.model_v_surf**2)
+    track['model_mag']=np.sqrt(track['model_u'+vel_suffix]**2 +
+                               track['model_v'+vel_suffix]**2)
     
 df_start['mean_model_mag']=df_start.track.apply( lambda t: np.nanmean( t.model_mag) )
 ## 
@@ -156,7 +168,6 @@ fig.savefig(os.path.join(fig_dir,'octant-swim_lateral.png'))
 
 ##
 
-
 fig=plt.figure(34)
 fig.clf()
 ax=fig.add_subplot(111)
@@ -178,7 +189,6 @@ ax.set_ylabel('Mean groundspeed')
 fig.savefig(os.path.join(fig_dir,'octant-gnd_speed.png'))
 
 ##
-
 
 fig=plt.figure(36)
 fig.clf()
