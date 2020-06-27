@@ -1,0 +1,4 @@
+*.log
+global*
+FISH_PTM.grd_*
+FISH_PTM.met

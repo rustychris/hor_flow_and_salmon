@@ -4,6 +4,7 @@ Had been in the grid directory, but moved here for quicker edit-run cycles
 """
 from stompy import utils
 from stompy.grid import unstructured_grid
+from stompy.spatial import wkb2shp
 import numpy as np
 import os
 
@@ -14,25 +15,23 @@ import bathy
 def add_bathy(g,suffix=''):
     dem=bathy.dem(suffix=suffix)
 
-    def eval_pnts(x):
-        z=dem(x)
-        z[np.isnan(z)]=5.0
-        return z
-
-    # For this high resolution grid don't worry so much
-    # about averaging or getting clever about bathymetry
-    g.add_node_field('node_z_bed', eval_pnts(g.nodes['x']), on_exists='overwrite')
-    g.add_edge_field('edge_z_bed', eval_pnts(g.edges_center()),on_exists='overwrite')
-    g.add_cell_field('z_bed', eval_pnts(g.cells_center()),on_exists='overwrite')
+    z=dem(g.cells_center())
+    z[np.isnan(z)]=5.0
+    g.add_cell_field('z_bed', z, on_exists='overwrite')
 
     return g
 
 def postprocess(g,suffix=""):
-    if suffix=='med0':
+    if suffix=="":
+        pass
+    elif suffix=='med0':
+        L=35
+        
         # First cut at anisotropic median filter.
         # depends on the grid matching this set of BCs:
         # see smooth_original_aniso.py for dev details
-        bcs=wkb2shp.shp2geom("../model/grid/snubby_junction/forcing-snubby-01.shp")
+        print("______________________MED0___________________")
+        bcs=wkb2shp.shp2geom("../grid/snubby_junction/forcing-snubby-01.shp")
         
         OR_left =np.array(bcs['geom'][1].coords)[0] # left end at OR
         OR_right=np.array(bcs['geom'][1].coords)[-1] # right end at OR
@@ -78,19 +77,22 @@ def postprocess(g,suffix=""):
 
         for c in utils.progress(g.valid_cell_iter()):
             # Get a large-ish neighborhood:
-            nbrs=np.array(g.select_cells_nearest( cc[c], count=200))
+            #nbrs=np.array(g.select_cells_nearest( cc[c], count=200))
+            nbrs=np.nonzero( utils.mag(cc-cc[c]) < L)[0]
 
-            alpha=10 # controls the degree of anistropy
+            alpha=10 # controls the degree of anisotropy
             coords=np.c_[ cc[nbrs], alpha*psi[nbrs]]
             coord0=np.array( [ cc[c,0],cc[c,1],alpha*psi[c] ] )
 
             dists=utils.mag(coords-coord0)
 
             # Will take the median of a subset of those:
-            subsel=np.argsort(dists)[:31]
+            # again, scale by size of nbrs to be grid-invariant
+            N=int(0.15*len(nbrs))
+            subsel=np.argsort(dists)[:N]
             close_nbrs=nbrs[subsel]
             d_med[c] = np.median( d_orig[close_nbrs] )
 
-        
         g.cells['z_bed']=d_med
-        
+    else:
+        assert False,"What is post processing suffix %s"%suffix

@@ -70,7 +70,7 @@ if use_ptm_output:
     run_starts=[nc['time'].values[0] for nc in avg_ncs]    
 else:                          
     # This time with proper friction
-    mod=sun_driver.SuntansModel.load('/opt2/san_joaquin/cfg008/cfg008_20180409')
+    mod=sun_driver.SuntansModel.load('/opt2/san_joaquin/cfg010/cfg010_20180409')
     
     seq=mod.chain_restarts()
     run_starts=np.array([mod.run_start for mod in seq])

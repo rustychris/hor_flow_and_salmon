@@ -1,0 +1,98 @@
+GLOBAL INFORMATION
+   -- output file only saves down to minutes?
+   END_TIME = '2018-03-25 00:01:01'
+   RESTART_DIR = 'none'
+   TIME_STEP_SECONDS = 0.5
+ 
+   -- deactivation logicals ---
+   REACHED_OPEN_BOUNDARY = 'true'
+   REACHED_FLOW_BOUNDARY = 'true'
+   ENTRAINED_BY_VOLUME_SINK = 'false'
+   CROSSED_LINE = 'false'
+   DEPOSITED_ON_BED = 'false'
+   CONSOLIDATED_ON_BED = 'false'
+ 
+   -- kill logicals ---
+   REACHED_OPEN_BOUNDARY = 'true'
+   REACHED_FLOW_BOUNDARY = 'true'
+   ENTRAINED_BY_VOLUME_SINK = 'false'
+   CROSSED_LINE = 'false'
+   DEPOSITED_ON_BED = 'false'
+   CONSOLIDATED_ON_BED = 'false'
+ 
+   -- line information --- 
+   NLINES = 0
+        
+TRANSECT INFORMATION -- applies to tidal surfing
+   NTRANSECTS = 0
+
+REGION INFORMATION
+   NREGIONS = 0
+RELEASE DISTRIBUTION INFORMATION
+   NRELEASE_DISTRIBUTION_SETS = 1
+
+   -- release distribution set 0 ---
+           RELEASE_DISTRIBUTION_SET = 'Global' 
+           MIN_BED_ELEVATION_METERS = -99.
+           MAX_BED_ELEVATION_METERS =  99. 
+           HORIZONTAL_DISTRIBUTION = 'rectangle'
+           XLOWERLEFT = 646846.54984
+           YLOWERLEFT = 4185452.2306
+           XUPPERRIGHT = 648044.19511
+           YUPPERRIGHT = 4186187.0052
+   
+           NPARTICLE_ASSIGNMENT = 'calculate'
+            XSPACING=10.0
+            YSPACING=10.0
+            VERTICAL_SPACING=0.1
+
+           -- NPARTICLE_ASSIGNMENT = 'specify'
+           -- 
+           --    TIME_VARIABLE_RELEASE = 'false'
+           --    NPARTICLES_PER_RELEASE_INTERVAL = 4000
+           --    AVERAGE_NPARTICLES_IN_VERTICAL = 1
+           --    DISTRIBUTION_AMONG_WATER_COLUMNS = 'uniform'
+
+            ZMIN_NON_DIM = 0.9
+            ZMAX_NON_DIM = 0.9
+            VERT_SPACING = 'uniform'
+
+
+RELEASE TIMING INFORMATION
+  NRELEASE_TIMING_SETS = 1
+
+    -- release timing set 1 ---        
+     RELEASE_TIMING_SET = 'once'
+     INITIAL_RELEASE_TIME = '2018-03-25 00:00:00'
+     RELEASE_TIMING = 'single'
+     INACTIVATION_TIME = 'none'
+BEHAVIOR INFORMATION
+   NBEHAVIOR_PROFILES = 0
+   NBEHAVIORS = 0
+
+OUTPUT INFORMATION 
+   NOUTPUT_SETS = 1
+
+   OUTPUT_SET = 'output'
+   FLAG_LOG_LOGICAL = 'false'
+   -- 1s
+   BINARY_OUTPUT_INTERVAL_HOURS = 0.00027777777
+   ASCII_OUTPUT_INTERVAL_HOURS = 'none' 
+   HISTOGRAM_OUTPUT_INTERVAL_HOURS = 'none'
+   STATISTICS_OUTPUT_INTERVAL_HOURS = 'none'
+   CONCENTRATION_OUTPUT_INTERVAL_HOURS = 'none'
+   REGION_COUNT_OUTPUT_INTERVAL_HOURS = 'none'
+   REGION_COUNT_UPDATE_INTERVAL_HOURS = 'none'
+   STATE_OUTPUT_INTERVAL_HOURS = 'none'
+
+PARTICLE GROUP INFORMATION 
+   NGROUPS = 1
+
+   --- group 0 ---
+                 GROUP = 'stream'
+                 RELEASE_DISTRIBUTION_SET = 'Global'
+                 RELEASE_TIMING_SET = 'once'
+                 PARTICLE_TYPE = 'none'
+                 BEHAVIOR_SET = 'none'
+                 OUTPUT_SET = 'output'
+                 OUTPUT_FILE_BASE = 'global'

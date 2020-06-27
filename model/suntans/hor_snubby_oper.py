@@ -72,8 +72,9 @@ def base_model(run_dir,run_start,run_stop,
         # dt=0.25 # for lower friction run on refined shore grid
         # with new grid that's deformed around the barrier can probably
         # get away with 0.5
-        #dt=0.5 # for lower friction run on refined shore grid
-        dt=0.25 # bit of safety for high res grid.
+        # dt=0.5 # for lower friction run on refined shore grid
+        # dt=0.25 # bit of safety for high res grid.
+        dt=0.1 # for shaved cell grid. still not stable.
         model.config['dt']=dt
         model.config['metmodel']=0 # 0: no wind, 4: wind only
 
@@ -88,13 +89,13 @@ def base_model(run_dir,run_start,run_stop,
         
         # model.config['thetaM']=-1
         model.config['thetaM']=-1 # with 1, seems to be unstable
-        model.config['z0B']=5e-3 # maybe with ADCP bathy need more friction
+        model.config['z0B']=5e-4 # maybe with ADCP bathy need more friction
         # slow, doesn't make a huge difference, but does make w nicer.
         model.config['nonhydrostatic']=0
         model.config['nu_H']=0.0
         model.config['nu']=1e-5
-        model.config['turbmodel']=1 # 1: my25, 10: parabolic
-        model.config['CdW']=0.0
+        model.config['turbmodel']=10 # 1: my25, 10: parabolic
+        model.config['CdW']=0.0 # 
         model.config['wetdry']=1
         model.config['maxFaces']=4
         model.config['mergeArrays']=1 # hopefully easier to use than split up.
@@ -103,20 +104,28 @@ def base_model(run_dir,run_start,run_stop,
         # 2019-07-12: further refinements 04 => 06
         #grid_src="../grid/snubby_junction/snubby-06.nc"
         #grid_src="../grid/snubby_junction/snubby-07-edit45.nc"
-        #grid_src="../grid/snubby_junction/snubby-08-edit06.nc" # this was pretty good.
+        #grid_src="../grid/snubby_junction/snubby-08-edit06.nc" 
         #grid_src="../grid/snubby_junction/snubby-08-edit24.nc"
-        grid_src="../grid/snubby_junction/snubby-08-edit50.nc" # high res in hole
+        #grid_src="../grid/snubby_junction/snubby-08-edit50.nc" # good
+        #grid_src="../grid/snubby_junction/snubby-08-edit60.nc" # higher res in hole
+        grid_src="../grid/snubby_junction/snubby-08-refine-edit03.nc" # double res of edit60
 
-        #bathy_suffix=''
-        bathy_suffix='adcp'
-        # on-grid bathy postprocessesing:
+        # bathy_suffix=''
+        # post_suffix='med0' # on-grid bathy postprocessesing:
+
+        #bathy_suffix='smooth' # pre-smoothed just in sand wave areas
+        bathy_suffix='smoothadcp' # pre-smoothed just in sand wave areas, and revisit ADCP data.
+        #bathy_suffix='smoothadcp2' # same, but extend ADCP data upstream.
+        post_suffix=''
+        
+        # bathy_suffix='adcp'
         # post_suffix=''
-        post_suffix='med0'
 
         grid_bathy=os.path.basename(grid_src).replace('.nc',f"-with_bathy{bathy_suffix}{post_suffix}.nc")
 
         if utils.is_stale(grid_bathy,[grid_src]):
             g_src=unstructured_grid.UnstructuredGrid.from_ugrid(grid_src)
+            g_src.cells_center(refresh=True)
             bare_edges=g_src.orient_edges(on_bare_edge='return')
             if len(bare_edges):
                 ec=g_src.edges_center()
@@ -124,10 +133,8 @@ def base_model(run_dir,run_start,run_stop,
                     print("Bare edge: j=%d  xy=%g %g"%(j, ec[j,0], ec[j,1]))
                 raise Exception('Bare edges in grid')
             add_bathy.add_bathy(g_src,suffix=bathy_suffix)
-            add_bathy.postprocess(g_src,post_suffix=post_suffix)
+            add_bathy.postprocess(g_src,suffix=post_suffix)
             
-            grid_roughness.add_roughness(g_src)
-
             g_src.write_ugrid(grid_bathy,overwrite=True)
             
         g=unstructured_grid.UnstructuredGrid.from_ugrid(grid_bathy)
@@ -188,15 +195,17 @@ def base_model(run_dir,run_start,run_stop,
         # was actually better, in terms of MAE over top 2m, and smaller bias.
         # with that in mind, steady012 will try an even smaller factor, and infact
         # something more in line with Nikuradse.
-        cell_z0B=0.5*model.grid.cells['bathy_rms']
-        e2c=model.grid.edge_to_cells()
-        nc1=e2c[:,0]
-        nc2=e2c[:,1]
-        nc2[nc2<0]=nc1[nc2<0]
-        # has been 0.1, 0.5, and even 1.0
-        # try going back to just a constant z0B
-        # edge_z0B=(1./30.)*( cell_z0B[nc1] + cell_z0B[nc2] )
-        # model.ic_ds['z0B']=('time','Ne'), edge_z0B[None,:]
+        # best roughness using constant z0B was 5e-4.
+        # so map 0.1 to that...
+        if 1:
+            grid_roughness.add_roughness(model.grid)
+            cell_z0B=(1./30)*model.grid.cells['bathy_rms']
+            e2c=model.grid.edge_to_cells()
+            nc1=e2c[:,0]
+            nc2=e2c[:,1]
+            nc2[nc2<0]=nc1[nc2<0]
+            edge_z0B=0.5*( cell_z0B[nc1] + cell_z0B[nc2] )
+            model.ic_ds['z0B']=('time','Ne'), edge_z0B[None,:]
         model.write_ic_ds()
 
         if int(model.config['metmodel'])>=4:
@@ -283,6 +292,7 @@ if __name__=='__main__':
         # cfg004: run in one go, rather than daily restarts.
         # cfg009: flows from WDL, very little friction, nonhydrostatic.
         #         more reasonable dzmin_surface.
+        # cfg010: new grid (8.60), many tweaks, new bathy.
         
         run_dir=f"{args.dir}_{date_str}"
 

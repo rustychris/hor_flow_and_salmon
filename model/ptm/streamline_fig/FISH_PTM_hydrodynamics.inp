@@ -1,0 +1,5 @@
+ NUM_FILES = 1
+  -- INPUT FILE 1 --
+  HYDRO_FILE_PATH = '/opt2/san_joaquin/cfg010/cfg010_20180320/'
+  FILENAME = 'ptm_average.nc_0000.nc'
+  GRD_NAME = 'ptm_average.nc_0000.nc'
