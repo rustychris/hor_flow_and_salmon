@@ -54,7 +54,7 @@ StretchType       = 0                   # Type of layer stretching, 0 = uniform,
 
 [numerics]
 CFLMax            = 0.5                 # Maximum Courant number
-AdvecType         = 33                  # Advection type (0: none, 1: Wenneker, 2: Wenneker q(uio-u), 3: Perot q(uio-u), 4: Perot q(ui-u), 5: Perot q(ui-u) without itself)
+AdvecType         = 1                  # Advection type (0: none, 1: Wenneker, 2: Wenneker q(uio-u), 3: Perot q(uio-u), 4: Perot q(ui-u), 5: Perot q(ui-u) without itself)
 TimeStepType      = 2                   # Time step handling (0: only transport, 1: transport + velocity update, 2: full implicit step-reduce, 3: step-Jacobi, 4: explicit)
 Limtyphu          = 0                   # Limiter type for waterdepth in continuity eqn. (0: none, 1: minmod, 2: van Leer, 3: Kooren, 4: monotone central)
 Limtypmom         = 4                   # Limiter type for cell center advection velocity (0: none, 1: minmod, 2: van Leer, 3: Kooren, 4: monotone central)
@@ -70,7 +70,7 @@ Fixedweirtopwidth = 3                   # Uniform width of the groyne part of fi
 Fixedweirtopfrictcoef= -999                # Uniform friction coefficient of the groyne part of fixed weirs
 Fixedweirtalud    = 0.25                # Uniform talud slope of fixed weirs
 Izbndpos          = 0                   # Position of z boundary (0: D3Dflow, 1: on net boundary, 2: on specifiend polyline)
-Tlfsmo            = 10800               # Fourier smoothing time (s) on waterlevel boundaries
+Tlfsmo            = 1800                # Fourier smoothing time (s) on waterlevel boundaries
 Slopedrop2D       = 0                   # Apply droplosses only if local bed slope > Slopedrop2D, (<=0: no drop losses)
 Chkadvd           = 0.1                 # Check advection terms if depth < chkadvdp, => less setbacks
 Teta0             = 0.55                # Theta of time integration (0.5 < theta < 1)
@@ -94,7 +94,7 @@ Cffacver          = 0.                  # Factor for including (1-CFL) in HO ter
 Jarhoxu           = 0                   # Include density gradient in advection term (0: no, 1: yes)
 Horadvtypzlayer   = 0                   # Horizontal advection treatment of z-layers (1: default, 2: sigma-like)
 Drop3D            = -999.               # Apply droplosses in 3D if z upwind below bob + 2/3 hu*drop3D
-MinTimestepBreak  = 0.                  # smallest allowed timestep (in s), checked on a sliding average of several timesteps. Run will abort when violated.
+MinTimestepBreak  = 0.01                # smallest allowed timestep (in s), checked on a sliding average of several timesteps. Run will abort when violated.
 SobekDFM_umin     = 0.                  # Minimal velocity treshold for weir losses in Sobek-DFM coupling.
 SobekDFM_umin_method= 0                   # Method for minimal velocity treshold for weir losses in Sobek-DFM coupling.
 
@@ -152,7 +152,7 @@ Gammax            = 1                   # Maximum wave height/water depth ratio
 [time]
 RefDate           = 20120801            # Reference date (yyyymmdd)
 Tzone             = 0                   # Time zone assigned to input time series
-DtUser            = 300                 # Time interval (s) for external forcing update
+DtUser            = 10                 # Time interval (s) for external forcing update
 DtNodal           =                     # Time interval (s) for updating nodal factors in astronomical boundary conditions
 DtMax             = 30                  # Maximal computation timestep (s)
 DtInit            = 1                   # Initial computation timestep (s)
@@ -186,13 +186,13 @@ HisFile           =
 HisInterval       = 1800                # History output times, given as "interval" "start period" "end period" (s)
 XLSInterval       =                     # Interval (s) between XLS history
 MapFile           =
-MapInterval       = 1800               # Map file output, given as "interval" "start period" "end period" (s)
-RstInterval       = 0                   # Restart file output times, given as "interval" "start period" "end period" (s)
+MapInterval       = 600               # Map file output, given as "interval" "start period" "end period" (s)
+RstInterval       = 1800                   # Restart file output times, given as "interval" "start period" "end period" (s)
 S1incinterval     =                     # Interval (m) in incremental file for water levels S1
 WaqInterval       =                     # Interval (in s) between DELWAQ file outputs
 StatsInterval     =                     # Interval (in s) between simulation statistics output.
 Writebalancefile  = 0                   # Write balance file (1: yes, 0: no)
-TimingsInterval   =                     # Timings statistics output interval
+TimingsInterval   = 10                  # Timings statistics output interval
 MapFormat         = 1                   # Map file format, 1: netCDF, 2: Tecplot, 3: netCFD and Tecplot, 4: NetCDF-UGRID
 Wrihis_balance    = 0                   # Write mass balance totals to his file (1: yes, 0: no)
 Wrihis_structure_gen= 0                   # Write general structure parameters to his file (1: yes, 0: no)
@@ -222,8 +222,8 @@ FullGridOutput    = 0                   # Full grid output mode (0: compact, 1: 
 EulerVelocities   = 0                   # Euler velocities output (0: GLM, 1: Euler velocities)
 TimeSplitInterval = 2 Y                 # Time splitting interval, after which a new output file is started. value+unit, e.g. '1 M', valid units: Y,M,D,h,m,s.
 Wrihis_structure_weir= 0                   # Write weir parameters to his file (1: yes, 0: no)
-Wrimap_salinity   = 1                   # Write salinity to map file (1: yes, 0: no)
-Wrimap_temperature= 1                   # Write temperature to map file (1: yes, 0: no)
+Wrimap_salinity   = 0                   # Write salinity to map file (1: yes, 0: no)
+Wrimap_temperature= 0                   # Write temperature to map file (1: yes, 0: no)
 
 [grw]
 Conductivity      = 0.                  # non dimensionless K conductivity   saturated (m/s), Q = K*A*i (m3/s)

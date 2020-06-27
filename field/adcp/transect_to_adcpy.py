@@ -61,7 +61,7 @@ class ADCPXrTransectData(adcpy.ADCPData):
         # dsr['z_ctr']=0.1 + -dsr['z_ctr'] + dsr['z_ctr'].values[0]
         # That still isn't working
         z=dsr['z_ctr'].values
-        z-=z[0] - 0.05 # add the -0.5 to make it clear that we are below water surface
+        z=z - z[0] - 0.05 # add the -0.5 to make it clear that we are below water surface
         self.bin_center_elevation=z
 
         self.n_ensembles=len(dsr.sample)

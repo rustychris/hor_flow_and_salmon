@@ -1,0 +1,9 @@
+__pycache__
+csv
+*~
+tag*.csv
+figs_trusted
+plot_cleaned_trusted
+plot_smoothed_trusted
+speed_over_ground_trusted
+swim_speed_trusted

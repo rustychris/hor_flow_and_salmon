@@ -1,0 +1,7 @@
+.RData
+.Rhistory
+yaps
+*~
+__pycache__
+*.stan.pkl
+.directory

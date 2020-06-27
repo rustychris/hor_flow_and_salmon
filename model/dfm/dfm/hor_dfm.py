@@ -71,8 +71,7 @@ model.add_flow_bc(Q=210,name='SJ_upstream')
 model.add_flow_bc(Q=-105,name='SJ_downstream')
 model.add_stage_bc(z=1.50,name='Old_River')
 
-if 1:
-    print("writing model config")
+if __name__=='__main__':
     model.write()
     print("partitioning")
     model.partition()

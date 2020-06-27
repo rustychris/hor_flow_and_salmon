@@ -1,0 +1,6 @@
+from stompy.model.suntans import sun_driver
+
+sun_driver.SuntansModel.sun_bin_dir="/home/rusty/src/suntans/main"
+sun_driver.SuntansModel.mpi_bin_dir="/usr/bin"
+
+cache_dir="cache"
