@@ -34,7 +34,10 @@ six.moves.reload_module(dflow_model)
 
 model=dflow_model.DFlowModel()
 
-model.dfm_bin_dir="/home/rusty/src/dfm/r53925-opt/bin"
+model.dfm_bin_dir=os.path.join(os.environ['HOME'],"src/dfm/r53925-opt/bin")
+model.mpi_bin_dir="/opt/cse/bin"
+
+
 model.num_procs=4
 model.z_datum='NAVD88'
 model.projection='EPSG:26910'
@@ -69,8 +72,11 @@ model.add_flow_bc(Q=-105,name='SJ_downstream')
 model.add_stage_bc(z=1.50,name='Old_River')
 
 if 1:
+    print("writing model config")
     model.write()
+    print("partitioning")
     model.partition()
+    print("Running")
     model.run_model()
 
 
