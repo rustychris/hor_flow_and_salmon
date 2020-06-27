@@ -11,12 +11,20 @@ import track_common
 ##
 
 input_path="screen_final"
-fig_dir=os.path.join(input_path,'figs-20200502')
-if not os.path.exists(fig_dir):
-    os.makedirs(fig_dir)
 
 df=track_common.read_from_folder(input_path)
 
+vel_suffix='_top1m'
+
+df['track'].apply(track_common.calc_velocities,
+                  model_u='model_u'+vel_suffix,model_v='model_v'+vel_suffix)
+
+##
+fig_dir=os.path.join(input_path,'figs-20200620'+vel_suffix)
+if not os.path.exists(fig_dir):
+    os.makedirs(fig_dir)
+
+                
 ##     PLOTS    ##
 
 from scipy.stats import gaussian_kde
@@ -31,7 +39,7 @@ turbo=scmap.load_gradient('turbo.cpt')
 hydros=pd.read_csv('yap-positions.csv')
 
 ## 
-dem=field.GdalGrid("../../bathy/junction-composite-dem-no_adcp.tif")
+dem=field.GdalGrid("../../bathy/junction-composite-20200604-w_smooth.tif")
 
 ##
 
@@ -148,7 +156,8 @@ def figure_swim_hydro_speed(num=23,
     fig.set_size_inches((8,2.75),forward=True)
 
     swim_speed =np.sqrt( seg_tracks['swim_u'].values**2 + seg_tracks['swim_v'].values**2)
-    hydro_speed=np.sqrt( seg_tracks['model_u_surf'].values**2 + seg_tracks['model_v_surf'].values**2)
+    hydro_speed=np.sqrt( seg_tracks['model_u'+vel_suffix].values**2 +
+                         seg_tracks['model_v'+vel_suffix].values**2)
 
     for ax,dep in [ (ax_mag,swim_speed),
                     (ax_u, np.abs(seg_tracks['swim_urel'].values)),
@@ -202,8 +211,8 @@ fig=figure_swim_hydro_speed(weights=weights,num=24)
 fig.savefig(os.path.join(fig_dir,"all_segments-swim_hydro_speed-per_tag.png"),dpi=200)
 
 ##
-model_u='model_u'
-model_v='model_v'
+model_u='model_u'+vel_suffix
+model_v='model_v'+vel_suffix
 
 def fig_track_swimming(seg_track,num=20,zoom=None,buttons=True,
                        swim_filt=None):
@@ -324,7 +333,7 @@ def fig_track_swimming(seg_track,num=20,zoom=None,buttons=True,
 # and didn't make the cut.  It still looks okay. So maybe worth relaxing that constraint?
 # 7577 is positive rheotaxis
 from stompy import filters
-plots=fig_track_swimming(df.loc['7ACD','track'],
+plots=fig_track_swimming(df.loc['7A96','track'],
                          num=20,
                          #swim_filt=lambda x: medfilt(x,9)
                          # swim_filt=lambda x: filters.lowpass_fir(x,winsize=13))
@@ -380,7 +389,6 @@ pos_cells=[g.select_cells_nearest(pnt,inside=True)
 
 ## 
 gwet=g.copy()
-gwet.add_cell_field('cell_depth',g.cells['cell_depth'])
 
 for c in np.nonzero( gwet.cells['cell_depth']>1.9 )[0]:
     gwet.delete_cell(c)

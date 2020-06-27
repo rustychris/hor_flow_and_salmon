@@ -14,7 +14,7 @@ import seaborn as sns
 
 ##
 
-fig_dir="figs20200411"
+fig_dir="figs20200620"
 if not os.path.exists(fig_dir):
     os.makedirs(fig_dir)
 
@@ -218,7 +218,7 @@ print("After removing long-duration or small position count tracks %d left"%(len
 
 # Add velocities
 df_screen['track'].apply(track_common.calc_velocities,
-                         model_u='model_u_surf',model_v='model_v_surf')
+                         model_u='model_u_top2m',model_v='model_v_top2m')
 
 ##
 
@@ -410,7 +410,7 @@ print(df.iloc[fast_tags,:].loc[:,'swim_spd_mean'])
 df=df_trim_crossings
 
 # Presumed predators:
-non_smolt = ['7A51','746D','74B4']
+non_smolt = ['746D'] # '7A51','74B4']
 
 smolt_sel = ~(df.index.isin(non_smolt))
 
@@ -420,5 +420,17 @@ print("Removed %d tracks as non-smolts, %d --> %d tracks"%
       (len(non_smolt), len(df), len(df_smolt)))
 
 ##
+
+# These depend on the choice of model velocity, so discard
+# whatever was used for the screening, and recompute later as needed
+# based on a specific choice of velocity
+del df_smolt['swim_spd_mean']
+del df_smolt['swim_spd_std']
+
+def clean_vel(t):
+    for f in ['swim_u', 'swim_v', 'swim_hdg', 'swim_hdg_rel', 'swim_urel', 'swim_vrel']:
+        del t[f]
+
+df_smolt['track'].apply(clean_vel)
 
 track_common.dump_to_folder(df_smolt, 'screen_final')

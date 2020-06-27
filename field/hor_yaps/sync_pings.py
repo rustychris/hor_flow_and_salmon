@@ -15,6 +15,7 @@ import pandas as pd
 import os
 import numpy as np
 from stompy import utils
+import time
 
 ##
 
@@ -418,6 +419,8 @@ for data_dir in [
         'yaps/full/20180406T0000-20180410T0000',
         'yaps/full/20180410T0000-20180415T0100'
         ]:
+
+    t_start=time.time()
     
     all_detections=pd.read_csv(os.path.join(data_dir,'all_detections.csv'))
     hydros=pd.read_csv(os.path.join(data_dir,'hydros.csv'),index_col='serial')
@@ -436,8 +439,13 @@ for data_dir in [
 
     sp=SyncPings(all_detections,hydros)
     sp.solve()
-    fig=sp.figure_sync()
 
+    t_elapse=time.time()-t_start
+    t_data=all_detections.epo.max() - all_detections.epo.min()
+    print("Elapsed %.2f s  %.1f days, %d detections. %d bad pings"%
+          (t_elapse,t_data/86400., len(all_detections), len(sp.bad_pings)))
+    fig=sp.figure_sync()
+    
     break
     fig.savefig(os.path.join(data_dir,'sync_summary.png'),dpi=250)
 
