@@ -1,3 +1,4 @@
 MSD*.nc
 *~
 segments_2m-model*.csv
+.directory
