@@ -73,8 +73,8 @@ def base_model(run_dir,run_start,run_stop,
         # with new grid that's deformed around the barrier can probably
         # get away with 0.5
         # dt=0.5 # for lower friction run on refined shore grid
-        # dt=0.25 # bit of safety for high res grid.
-        dt=0.1 # for shaved cell grid. still not stable.
+        dt=0.25 # bit of safety for high res grid.
+        # dt=0.1 # for shaved cell grid. still not stable.
         model.config['dt']=dt
         model.config['metmodel']=0 # 0: no wind, 4: wind only
 
@@ -87,7 +87,6 @@ def base_model(run_dir,run_start,run_stop,
             model.config['Nkmax']=50
             model.config['stairstep']=1 # 3D, stairstep
         
-        # model.config['thetaM']=-1
         model.config['thetaM']=-1 # with 1, seems to be unstable
         model.config['z0B']=5e-4 # maybe with ADCP bathy need more friction
         # slow, doesn't make a huge difference, but does make w nicer.
@@ -107,8 +106,8 @@ def base_model(run_dir,run_start,run_stop,
         #grid_src="../grid/snubby_junction/snubby-08-edit06.nc" 
         #grid_src="../grid/snubby_junction/snubby-08-edit24.nc"
         #grid_src="../grid/snubby_junction/snubby-08-edit50.nc" # good
-        #grid_src="../grid/snubby_junction/snubby-08-edit60.nc" # higher res in hole
-        grid_src="../grid/snubby_junction/snubby-08-refine-edit03.nc" # double res of edit60
+        grid_src="../grid/snubby_junction/snubby-08-edit60.nc" # higher res in hole
+        #grid_src="../grid/snubby_junction/snubby-08-refine-edit03.nc" # double res of edit60
 
         # bathy_suffix=''
         # post_suffix='med0' # on-grid bathy postprocessesing:
@@ -149,8 +148,9 @@ def base_model(run_dir,run_start,run_stop,
 
     # with 0.01, was getting many CmaxW problems.
     model.config['dzmin_surface']=0.05 # may have to bump this up..
-    model.config['ntout']=int(600./dt) # just during testing
-    model.config['ntoutStore']=int(3600./dt)
+    model.config['ntout']=int(1800./dt) 
+    model.config['ntaverage']=int(1800./dt)
+    model.config['ntoutStore']=int(86400./dt)
     # isn't this just duplicating the setting from above?
     model.z_offset=0.0 # moving away from the semi-automated datum shift to manual shift
 
@@ -256,11 +256,20 @@ if __name__=='__main__':
     # range of tag data is
     # 2018-03-16 23:53:00 to 2018-04-11 14:11:00
     # for ptm output, start a bit earlier
-    multi_run_start=np.datetime64(args.start)
-    multi_run_stop=np.datetime64(args.end)
-
+    if args.resume is not None:
+        # Go ahead and get the restart time, so that intervals and directory names
+        # can be chosen below
+        last_run_dir=args.resume
+        last_model=drv.SuntansModel.load(last_run_dir)
+        multi_run_start=last_model.restartable_time()
+        print("Will resume run in %s from %s"%(last_run_dir,multi_run_start))
+    else:
+        multi_run_start=np.datetime64(args.start)
+        print("Run start: ",run_start)
+        last_run_dir=None
+        
     run_start=multi_run_start
-    print(run_start)
+    multi_run_stop=np.datetime64(args.end)
 
     # series of 1-day runs
     # run_interval=np.timedelta64(1,'D')
@@ -280,10 +289,10 @@ if __name__=='__main__':
     assert args.dir is not None
         
     run_count=0
-    last_run_dir=None
+    # For restarts, we don't yet know the run_start
     while run_start < multi_run_stop:
         run_stop=run_start+run_interval
-        print(run_start,run_stop)
+        print("Simulation period: %s -- %s"%(run_start,run_stop))
         date_str=utils.to_datetime(run_start).strftime('%Y%m%d')
         # cfg000: first go
         # cfg001: 2D
