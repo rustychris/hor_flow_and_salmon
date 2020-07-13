@@ -168,16 +168,24 @@ def base_model(run_dir,run_start,run_stop,
         # could be too much friction, or too high BC.
         h_old_river=drv.StageBC(name='Old_River',z=1.75 + model.manual_z_offset)
     else:
+        # 15 minute data. The flows in particular have enough overtide energy
+        # that the lowpass interval shouldn't be too large. Spot checks of plots
+        # show 1.0h is pretty good
+        lp_hours=1.0
+        
         data_upstream=common.msd_flow(model.run_start,model.run_stop)
-        Q_upstream=drv.FlowBC(name="SJ_upstream",Q=data_upstream.flow_m3s,dredge_depth=None)
+        Q_upstream=drv.FlowBC(name="SJ_upstream",Q=data_upstream.flow_m3s,dredge_depth=None,
+                              filters=[dfm.Lowpass(cutoff_hours=1.0)])
 
         data_downstream=common.sjd_flow(model.run_start,model.run_stop)
         # flip sign to get outflow.
-        Q_downstream=drv.FlowBC(name="SJ_downstream",Q=-data_downstream.flow_m3s,dredge_depth=None)
+        Q_downstream=drv.FlowBC(name="SJ_downstream",Q=-data_downstream.flow_m3s,dredge_depth=None,
+                                filters=[dfm.Lowpass(cutoff_hours=1.0)])
 
         or_stage=common.oh1_stage(model.run_start,model.run_stop)
         h_old_river=drv.StageBC(name='Old_River',z=or_stage.stage_m,
-                                filters=[dfm.Transform(fn=lambda x: x+model.manual_z_offset)])
+                                filters=[dfm.Transform(fn=lambda x: x+model.manual_z_offset),
+                                         dfm.Lowpass(cutoff_hours=1.0)])
 
     model.add_bcs([Q_upstream,Q_downstream,h_old_river])
     
@@ -246,9 +254,9 @@ if __name__=='__main__':
                         action='store_true')
     parser.add_argument("--steady",help="Use constant flows",
                         action='store_true')
-    parser.add_argument("--interval",help="Interval for multiple shorter runs, e.g. 1D for 1 day",
+    parser.add_argument("-i","--interval",help="Interval for multiple shorter runs, e.g. 1D for 1 day",
                         default=None)
-
+    
     # args="-d runs/short036 -s 2018-04-05T12:00 -e 2018-04-05T16:00 ".split()
     args=None
     args=parser.parse_args(args=args)
@@ -265,7 +273,7 @@ if __name__=='__main__':
         print("Will resume run in %s from %s"%(last_run_dir,multi_run_start))
     else:
         multi_run_start=np.datetime64(args.start)
-        print("Run start: ",run_start)
+        print("Run start: ",multi_run_start)
         last_run_dir=None
         
     run_start=multi_run_start
@@ -302,6 +310,7 @@ if __name__=='__main__':
         # cfg009: flows from WDL, very little friction, nonhydrostatic.
         #         more reasonable dzmin_surface.
         # cfg010: new grid (8.60), many tweaks, new bathy.
+        # cfg011: lowpass boundary conditions
         
         run_dir=f"{args.dir}_{date_str}"
 
