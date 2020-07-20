@@ -298,7 +298,13 @@ if __name__=='__main__':
         
     run_count=0
     # For restarts, we don't yet know the run_start
-    while run_start < multi_run_stop:
+    while True:
+        if last_run_dir is not None:
+            last_run=drv.SuntansModel.load(last_run_dir)
+            run_start=last_run.restartable_time()
+        if run_start>=multi_run_stop:
+            break
+        
         run_stop=run_start+run_interval
         print("Simulation period: %s -- %s"%(run_start,run_stop))
         date_str=utils.to_datetime(run_start).strftime('%Y%m%d')
@@ -335,7 +341,7 @@ if __name__=='__main__':
                 model.run_simulation()
         run_count+=1
         last_run_dir=run_dir
-        run_start=run_stop
+
 
 
         
