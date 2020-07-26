@@ -23,6 +23,7 @@ from stompy.grid import unstructured_grid
 import common
 
 from stompy.model.suntans import sun_driver as drv
+import stompy.model.hydro_model as hm
 import stompy.model.delft.dflow_model as dfm
 import add_bathy
 import grid_roughness
@@ -162,11 +163,11 @@ def base_model(run_dir,run_start,run_stop,
     if steady:
         # Would like to ramp these up at the very beginning.
         # Mossdale, tested at 220.0 m3/s
-        Q_upstream=drv.FlowBC(name='SJ_upstream',Q=220.0,dredge_depth=None)
-        Q_downstream=drv.FlowBC(name='SJ_downstream',Q=-100,dredge_depth=None)
+        Q_upstream=drv.FlowBC(name='SJ_upstream',flow=220.0,dredge_depth=None)
+        Q_downstream=drv.FlowBC(name='SJ_downstream',flow=-100,dredge_depth=None)
         # had been 1.75.  but that's showing about 0.75m too much water.
         # could be too much friction, or too high BC.
-        h_old_river=drv.StageBC(name='Old_River',z=1.75 + model.manual_z_offset)
+        h_old_river=drv.StageBC(name='Old_River',water_level=1.75 + model.manual_z_offset)
     else:
         # 15 minute data. The flows in particular have enough overtide energy
         # that the lowpass interval shouldn't be too large. Spot checks of plots
@@ -174,18 +175,18 @@ def base_model(run_dir,run_start,run_stop,
         lp_hours=1.0
         
         data_upstream=common.msd_flow(model.run_start,model.run_stop)
-        Q_upstream=drv.FlowBC(name="SJ_upstream",Q=data_upstream.flow_m3s,dredge_depth=None,
-                              filters=[dfm.Lowpass(cutoff_hours=1.0)])
+        Q_upstream=drv.FlowBC(name="SJ_upstream",flow=data_upstream.flow_m3s,dredge_depth=None,
+                              filters=[hm.Lowpass(cutoff_hours=1.0)])
 
         data_downstream=common.sjd_flow(model.run_start,model.run_stop)
         # flip sign to get outflow.
-        Q_downstream=drv.FlowBC(name="SJ_downstream",Q=-data_downstream.flow_m3s,dredge_depth=None,
-                                filters=[dfm.Lowpass(cutoff_hours=1.0)])
+        Q_downstream=drv.FlowBC(name="SJ_downstream",flow=-data_downstream.flow_m3s,dredge_depth=None,
+                                filters=[hm.Lowpass(cutoff_hours=1.0)])
 
         or_stage=common.oh1_stage(model.run_start,model.run_stop)
-        h_old_river=drv.StageBC(name='Old_River',z=or_stage.stage_m,
-                                filters=[dfm.Transform(fn=lambda x: x+model.manual_z_offset),
-                                         dfm.Lowpass(cutoff_hours=1.0)])
+        h_old_river=drv.StageBC(name='Old_River',water_level=or_stage.stage_m,
+                                filters=[hm.Transform(fn=lambda x: x+model.manual_z_offset),
+                                         hm.Lowpass(cutoff_hours=1.0)])
 
     model.add_bcs([Q_upstream,Q_downstream,h_old_river])
     
@@ -206,6 +207,7 @@ def base_model(run_dir,run_start,run_stop,
         # best roughness using constant z0B was 5e-4.
         # so map 0.1 to that...
         if 1:
+            print("Adding roughness")
             grid_roughness.add_roughness(model.grid)
             cell_z0B=(1./30)*model.grid.cells['bathy_rms']
             e2c=model.grid.edge_to_cells()
