@@ -307,7 +307,7 @@ if __name__=='__main__':
         if run_start>=multi_run_stop:
             break
         
-        run_stop=run_start+run_interval
+        run_stop=min(run_start+run_interval,multi_run_stop)
         print("Simulation period: %s -- %s"%(run_start,run_stop))
         date_str=utils.to_datetime(run_start).strftime('%Y%m%d')
         # cfg000: first go
