@@ -71,7 +71,9 @@ if use_ptm_output:
 else:                          
     # mod=sun_driver.SuntansModel.load('/opt2/san_joaquin/cfg008/cfg008_20180409')
     # New run, attached via USB to laptop:
-    mod=sun_driver.SuntansModel.load('/media/rusty/80c8a8ec-71d2-4687-aa6b-41c23f557be8/san_joaquin/cfg010/cfg010_20180409')
+    # mod=sun_driver.SuntansModel.load('/media/rusty/80c8a8ec-71d2-4687-aa6b-41c23f557be8/san_joaquin/cfg010/cfg010_20180409')
+    # On Farm:
+    mod=sun_driver.SuntansModel.load('/home/rustyh/src/hor_flow_and_salmon/model/suntans/runs/cfg012_farm12_20180409')
     # Or on cws-linuxmodeling:
     # mod=sun_driver.SuntansModel.load('/opt2/san_joaquin/cfg010/cfg010_20180409')
     
