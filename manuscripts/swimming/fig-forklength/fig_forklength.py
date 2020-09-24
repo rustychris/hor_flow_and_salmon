@@ -19,6 +19,6 @@ ax.set_ylabel("Density")
 ax.set_xlabel("Fork length (mm)")
 ax.axis(xmin=68,xmax=87)
 ax.legend(loc='upper right',title='Release')
-fig.subplots_adjust(bottom=0.15,left=0.15,top=0.95,right=0.93)
+fig.subplots_adjust(bottom=0.17,left=0.15,top=0.95,right=0.93)
 
 fig.savefig('fork-length.png',dpi=200)
