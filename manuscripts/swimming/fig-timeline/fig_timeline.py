@@ -26,6 +26,8 @@ utils.path(yaps_dir)
 
 import track_common
 
+utils.path("../../../model/suntans")
+import common
 ##
 
 df_start=track_common.read_from_folder(os.path.join(yaps_dir,'screen_final'))
@@ -45,8 +47,7 @@ def fetch_and_parse(local_file,url,**kwargs):
 
 ## 
 
-print("WARNING - CONFIRM TAG RELEASE DATES")
-tag_releases=np.array([np.datetime64("2018-03-05 00:00"),
+tag_releases=np.array([np.datetime64("2018-03-02 00:00"),
                        np.datetime64("2018-03-15 00:00")] )
               
 ##
@@ -57,15 +58,24 @@ t_min=min(times.min(),tag_releases.min()) - pad
 t_max=max(times.max(),tag_releases.max()) + pad
 
 # MSD flows
-msd_flow=fetch_and_parse(local_file="env_data/msd/flow-2018.csv",
-                         url="http://wdl.water.ca.gov/waterdatalibrary/docs/Hydstra/docs/B95820Q/2018/FLOW_15-MINUTE_DATA_DATA.CSV",
-                         skiprows=3,parse_dates=['time'],names=['time','flow_cfs','quality','notes'])
+msd_flow=common.msd_flow(np.datetime64("2018-03-01"),
+                         np.datetime64("2018-04-20"))
+# fetch_and_parse(local_file="env_data/msd/flow-2018.csv",
+#                          url="http://wdl.water.ca.gov/waterdatalibrary/docs/Hydstra/docs/B95820Q/2018/FLOW_15-MINUTE_DATA_DATA.CSV",
+#                          skiprows=3,parse_dates=['time'],names=['time','flow_cfs','quality','notes'])
 
 msd_turb=cdec.cdec_dataset('MSD',t_min,t_max,sensor=27,cache_dir='env_data')
 msd_turb['turb_lp']=('time',),signal.medfilt(msd_turb.sensor0027.values,5)
 
 msd_temp=cdec.cdec_dataset('MSD',t_min,t_max,sensor=25,cache_dir='env_data')
 msd_temp['temp']=('time'), (msd_temp['sensor0025']-32)*5./9
+
+##
+sjd_flow=common.sjd_flow(np.datetime64("2018-03-01"),
+                         np.datetime64("2018-04-20"))
+
+hor_flow=common.oh1_flow(np.datetime64("2018-03-01"),
+                         np.datetime64("2018-04-20"))
 
 ##
 
@@ -95,12 +105,18 @@ for i,rel_date in enumerate(tag_releases):
     else: lbl='__nolabel__'
     ax_tag.axvline(rel_date,label=lbl)
 ax_tag.plot(np.r_[t_min,t_sort],np.arange(len(times)+1),'k-',
-            label='Cumulative\nTag Arrival')
+            label='Tag Arrivals')
     
 ax_tag.set_ylabel('Tag count')
 
-ax_Q.plot(msd_flow.time,msd_flow.flow_cfs/35.314667,
-          label='Mossdale Flow')
+ax_Q.plot(msd_flow.time,msd_flow.flow_m3s,
+          label='MSD Flow')
+
+ax_Q.plot(sjd_flow.time,sjd_flow.flow_m3s,
+          label='SJD Flow')
+ax_Q.plot(hor_flow.time,hor_flow.flow_m3s,
+          label='OH1 Flow')
+ax_Q.axhline(0,color='k',lw=0.6,zorder=-2)
 
 for ti,t in enumerate(adcp_times):
     if ti==0:
@@ -123,7 +139,7 @@ plt.setp(ax_turb.get_yticklabels(),color=turb_col)
 plt.setp(ax_temp.get_yticklabels(), color=temp_col)
 
 fig.autofmt_xdate()
-fig.subplots_adjust(left=0.10,top=0.98,bottom=0.17,right=0.70)
+fig.subplots_adjust(left=0.13,top=0.98,bottom=0.17,right=0.70)
 fig.align_ylabels()
 
 ax_tag.axis(xmin=t_min, xmax=t_max)
@@ -133,5 +149,6 @@ ax_Q.legend(loc='upper left',bbox_to_anchor=[1.13,1],frameon=0)
 ax_temp.legend(handles=ax_temp.lines+ax_turb.lines,loc='upper left',bbox_to_anchor=[1.13,1],
                frameon=0)
 
+##
 fig.savefig('fig-timeline.png',dpi=200)
 
