@@ -5,3 +5,5 @@ yaps
 __pycache__
 *.stan.pkl
 .directory
+fig_analysis*
+figs20*

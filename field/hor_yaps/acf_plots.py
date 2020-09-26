@@ -23,7 +23,9 @@ dem=field.GdalGrid("../../bathy/junction-composite-dem-no_adcp.tif")
 clip=(647167.570005404,647416.10024743,
       4185000,4186500)
 demcrop=dem.crop(clip)
+
 ##
+
 def unwrap(angles):
     deltas=(np.diff(angles) + np.pi)%(2*np.pi) - np.pi
     return np.cumsum( np.r_[angles[0],deltas] )
@@ -40,16 +42,26 @@ def expand(data,time,dt_nom=5.0):
 
 ##
 
-#input_path="screen_final"
-input_path="with_nonsmolt"
-fig_dir=os.path.join(input_path,'figs-20200428')
+input_path="screen_final"
+#input_path="with_nonsmolt"
+fig_dir=os.path.join(input_path,'figs-20200921')
 if not os.path.exists(fig_dir):
     os.makedirs(fig_dir)
 
 df=track_common.read_from_folder(input_path)
 
-##
+# With multiple velocities, need this stanza to choose one
 
+# RH: return to this code to compare heading distributions
+vel_suffix='_top2m'
+df['track'].apply(track_common.calc_velocities,
+                  model_u='model_u'+vel_suffix,
+                  model_v='model_v'+vel_suffix)
+
+track_common.clip_to_analysis_polygon(df,'track')
+
+
+## 
 def add_more_swim_data(track):
     swim_hdg_rel_uw=np.r_[ unwrap(track['swim_hdg_rel'].values[:-1]),
                            np.nan ]
@@ -275,3 +287,37 @@ fig.savefig(os.path.join(fig_dir,'pacf_boxplot-hdg-speed.png'))
 ##
 
 # What about those tracks where PACF(1)<0 ?
+
+##
+
+# Distribution of relative heading
+for idx,row in df.iterrows():
+    row['track']['id'] = idx
+
+seg_tracks=pd.concat( [ track.iloc[:-1,:]
+                        for track in df['track'].values ] )
+
+# all_hdg_rel=np.concatenate( [ track.swim_hdg_rel.values for track in df['track'].values] )
+
+# Weights -- segments per individual sum to unit weight
+seg_counts=seg_tracks.groupby(seg_tracks.id).size()
+weights=1./seg_counts[ seg_tracks.id]
+
+##
+
+plt.figure(10).clf()
+fig,axs=plt.subplots(2,1,num=10)
+
+axs[0].hist(seg_tracks.swim_hdg_rel.values,bins=100)
+
+axs[1].hist(seg_tracks.swim_hdg_rel.values,weights=weights,bins=100)
+
+# Pos vs. neg rheotaxis:
+neg_sel=np.abs(seg_tracks.swim_hdg_rel.values)<np.pi/2
+pos_sel=np.abs(seg_tracks.swim_hdg_rel.values)>np.pi/2
+
+neg_count= weights[neg_sel].sum()
+pos_count= weights[pos_sel].sum()
+print(f"Negative rheotaxis: {100*neg_count/weights.sum():.1f}%") # 29.6%
+print(f"Positive rheotaxis: {100*pos_count/weights.sum():.1f}%") # 70.4%
+

@@ -70,6 +70,9 @@ print("%d tracks remain after merging"%len(df_merged)) # 195
 
 ##
 
+
+##
+
 if 1: # Plot the global distribution of position standard deviations
     all_var_xy=np.concatenate( [ (df.x_sd**2 + df.y_sd**2).values
                                  for df in df_merged['track'] ])
@@ -342,6 +345,7 @@ for idx,row in df.iterrows():
     
 ##
 
+# Rather than do this here
 plt.figure(14).clf()
 fig,ax=plt.subplots(num=14)
 ax.hist(df.swim_spd_mean,bins=25)

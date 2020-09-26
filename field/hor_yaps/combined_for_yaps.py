@@ -51,11 +51,23 @@ breaks=[np.datetime64("2018-03-13 19:00:00"),
         np.datetime64("2018-04-15 01:00:00")]
 
 pm_nomp=pm.remove_multipath()
+##
+
+total_detections=sum( [det.dims['index'] for det in pm.all_detects])
+total_nomp_detections=sum( [det.dims['index'] for det in pm_nomp.all_detects])
+
+print("Total detections (via prepare_pings): ", total_detections)
+# Total detections (via prepare_pings):  5244204
+print("Total detections after multipath filter (via prepare_pings): ", total_nomp_detections)
+# Total detections after multipath filter (via prepare_pings):  4338914
 
 ##
-force=False
+force=True
 # these are short but not empty. explicitly ignore.
 name_blacklist=['SM1.0','SM4.1', 'SM3.0', 'SM4.1']
+
+count_in=0
+count_out=0
 
 for period in zip(breaks[:-1],breaks[1:]):
     period_dir=f"yaps/full/{fmt(period[0])}-{fmt(period[1])}"
@@ -70,6 +82,10 @@ for period in zip(breaks[:-1],breaks[1:]):
     else:
         pm_clip=pm_nomp.clip_time(period)
 
+    period_detections=sum( [det.dims['index'] for det in pm_clip.all_detects])
+    print(f"{period} detections {period_detections}")
+    count_in+=period_detections
+        
     dfs=[]
     hydro_recs=[]
 
@@ -96,9 +112,18 @@ for period in zip(breaks[:-1],breaks[1:]):
         
     df_all=pd.concat(dfs)
     df_all.to_csv(os.path.join(period_dir,'all_detections.csv'),index=False)
+    
+    print(f"{period} all_detections {len(df_all)}")
+    count_out+=len(df_all)
 
     hydros=pd.DataFrame(hydro_recs)
     hydros.to_csv(os.path.join(period_dir,'hydros.csv'),index=False)
+
+# Total count unclipped is about 5.2M, but I think that includes times
+# when receivers weren't in the water, or maybe very few were in
+# the water.
+print(f"Clipping {count_in} total in, {count_out} total out")
+# Clipping 2765802 total in, 2765610 total out
 
 ##
 import matplotlib.pyplot as plt 

@@ -411,7 +411,9 @@ class SyncPings(object):
 
 # some of these could be longer, but it probably doesn't matter
 for data_dir in [
-        #'yaps/full/20180313T1900-20180316T0152',
+        # This first one had been commented out -- probably just to
+        # streamline execution.
+        'yaps/full/20180313T1900-20180316T0152',
         'yaps/full/20180316T0152-20180321T0003',
         'yaps/full/20180321T0003-20180326T0000',
         'yaps/full/20180326T0000-20180401T0000',
@@ -446,7 +448,6 @@ for data_dir in [
           (t_elapse,t_data/86400., len(all_detections), len(sp.bad_pings)))
     fig=sp.figure_sync()
     
-    break
     fig.savefig(os.path.join(data_dir,'sync_summary.png'),dpi=250)
 
     # Now get 0.4ms RMSE for the 5 day period.

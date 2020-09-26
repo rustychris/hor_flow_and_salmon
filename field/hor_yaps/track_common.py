@@ -5,6 +5,11 @@ import pandas as pd
 from shapely import geometry
 from stompy.spatial import wkb2shp
 from stompy import utils
+from matplotlib.path import Path
+
+from stompy.plot import plot_wkb
+from stompy.grid import unstructured_grid
+
 
 def dump_to_folder(df,path,clean=True):
     """
@@ -89,7 +94,8 @@ def calc_velocities(track,model_u='model_u_surf',model_v='model_v_surf'):
     dx=np.diff(track.x.values)
     dy=np.diff(track.y.values)
     dt=np.diff(track.tnum)
-    
+
+    track['vel_dt']=np.r_[dt,np.nan]
     track['ground_u']=np.r_[dx/dt,np.nan]
     track['ground_v']=np.r_[dy/dt,np.nan]
     track['swim_u']=track['ground_u'] - track[model_u]
@@ -237,3 +243,88 @@ def set_direction_labels(ax):
     ax.text( 0.0, 0.5, 'River\nLeft',va='center',ha='left',**common)
     ax.text( 1.0, 0.5, 'River\nRight',  va='center',ha='right',**common)
 
+def medfilt_weighted(data,N,weights=None):
+    """
+    Running median filter with weights for each data point
+    data: np.ndarray shape [M]
+    N: length of the window (weights are not accounted for in the window size)
+    weights: np.ndarray shape [M]
+    """
+    quantile=0.5
+    if weights is None:
+        weights=np.ones(len(data))
+
+    data=np.asarray(data)
+    weights=np.asarray(weights)
+    
+    result=np.zeros_like(data)
+    neg=N//2
+    pos=N-neg
+    for i in range(len(result)):
+        # say N is 5
+        # when i=0, we get [0,3]
+        # when i=10, we get [8,13
+        slc=slice( max(0,i-neg),
+                   min(i+pos,len(data)) )
+        subdata=data[slc]
+        # Sort the data
+        ind_sorted = np.argsort(subdata)
+        sorted_data = subdata[ind_sorted]
+        sorted_weights = weights[slc][ind_sorted]
+        # Compute the auxiliary arrays
+        Sn = np.cumsum(sorted_weights)
+        # center those and normalize
+        Pn = (Sn-0.5*sorted_weights)/Sn[-1]
+        result[i]=np.interp(quantile, Pn, sorted_data)
+    return result
+
+def analysis_polygon():
+    g=unstructured_grid.UnstructuredGrid.from_shp('track_gates-v00.shp',max_sides=50)
+    g.make_cells_from_edges(max_sides=50)
+    # Which cells do I want?
+    # center above the junction
+    line_sel=geometry.LineString( [(647386.0027503968, 4185726.9867515), (647229.4335734614, 4185864.215030108)])
+
+    for c in g.select_cells_intersecting(line_sel,as_type='indices',invert=True):
+        g.delete_cell(c)
+    g.delete_orphan_edges()
+    g.delete_orphan_nodes()
+
+    clip_poly=g.boundary_polygon_by_union()
+    return clip_poly
+
+def analysis_path():
+    clip_poly=analysis_polygon()
+    return Path( np.array( clip_poly.exterior ) )
+
+def clip_to_analysis_polygon(df,label,min_remaining=10):
+    """
+    df: DataFrame with tracks and other data
+    label: the column label holding the track to be trimmed
+    min_remaining: if fewer than this number of samples remain, remove
+    the row from the dataframe.
+
+    Modifies tracks and the dataframe in place.
+    """
+    # What about a track that leaves the region and then comes back?
+    # Make a point to clip *after* calculating swim velocities, and then
+    # just include all the points inside the analysis region, since the
+    # motivation is just to exclude points where the swim speed is not
+    # reliable.
+    # Alternatively I could nan out swim velocities outside the polygon,
+    # but that's going to require a tweak to every plot.
+
+    clip_path=analysis_path()
+
+    for k,track in df[label].iteritems():
+        inside=clip_path.contains_points( track.loc[:, ['x','y']].values )
+
+        track.drop(list(np.nonzero(~inside)[0]),
+                   inplace=True,axis=0)
+
+    lengths=[ len(t) for t in df[label].values ]
+    too_short=np.array(lengths)<min_remaining
+    df.drop( df[too_short].index, inplace=True)
+    
+    
+    

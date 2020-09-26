@@ -1,8 +1,13 @@
 import matplotlib.pyplot as plt
 from scipy import stats
+from scipy.signal import medfilt
+import statsmodels.api as sm
 import numpy as np
+import six
 import os
 import track_common
+six.moves.reload_module(track_common)
+
 import seaborn as sns
 from stompy import memoize, utils
 import pandas as pd
@@ -13,13 +18,12 @@ from scipy import signal
 
 vel_suffix='_top2m'
 
-fig_dir="fig_analysis-20200620"+vel_suffix
+fig_dir="fig_analysis-20200924"+vel_suffix
 if not os.path.exists(fig_dir):
     os.makedirs(fig_dir)
 
 ## 
 df_start=track_common.read_from_folder('screen_final')
-
 
 ##
 
@@ -27,7 +31,12 @@ df_start['track'].apply(track_common.calc_velocities,
                         model_u='model_u'+vel_suffix,
                         model_v='model_v'+vel_suffix)
 
+# Do this after the swimspeeds are computed, otherwise when
+# a track leaves and comes back, there will be a swim speed
+# that jumps from the exit point to the re-entry point
+track_common.clip_to_analysis_polygon(df_start,'track')
 
+## 
 # Day-night variability
 
 t_min=df_start.track.apply( lambda t: t.tnum.min() )
@@ -55,10 +64,6 @@ for track in df_start.track.values:
                                track['model_v'+vel_suffix]**2)
     
 df_start['mean_model_mag']=df_start.track.apply( lambda t: np.nanmean( t.model_mag) )
-## 
-
-# spot check track 71A9, and the times work out. tod_mid is seconds
-# into the day, UTC.
 
 ## 
 
@@ -115,7 +120,6 @@ ax.set_xlabel('Hour of day (PDT)')
 ax.spines['top'].set_visible(0)
 ax.spines['right'].set_visible(0)
 
-
 # This is a rough approach to a circular kde
 vm=stats.vonmises
 theta=np.linspace(0,2*np.pi,100)
@@ -143,14 +147,23 @@ fig.savefig(os.path.join(fig_dir,'diel-presence-bar.png'))
 
 ## 
 
+def boxplot_n(x,y,data,**kw):
+    ax=sns.boxplot(x=x,y=y,data=data,**kw)
+    # show N for each:
+    for grp_i,(xval,grp) in enumerate(data.groupby(x)[y]):
+        ax.text( grp_i, grp.median(), "%d"%(grp.count()), ha='center',fontsize=12,
+                 color='w',va='center')
+##    
 fig=plt.figure(32)
 fig.clf()
 ax=fig.add_subplot(111)
 
 # bin by 3 hour chunks
-sns.boxplot(x='tod_mid_octant',y='mean_swim_urel',data=df_start,ax=ax)
+boxplot_n(x='tod_mid_octant',y='mean_swim_urel',data=df_start,ax=ax)
+
 ax.set_xlabel('Middle of 3-hour bin (h)')
 ax.set_ylabel('Mean downstream swimming')
+
 fig.savefig(os.path.join(fig_dir,'octant-swim_urel.png'))
 
 ## 
@@ -161,10 +174,94 @@ ax=fig.add_subplot(111)
 
 # bin by 3 hour chunks
 df_start['tod_mid_octant']=1.5 + 3*np.floor(df_start['tod_mid_s']/(3*3600.))
-sns.boxplot(x='tod_mid_octant',y='mean_swim_lateral',data=df_start,ax=ax)
+boxplot_n(x='tod_mid_octant',y='mean_swim_lateral',data=df_start,ax=ax)
 ax.set_xlabel('Middle of 3-hour bin (h)')
 ax.set_ylabel('Mean lateral swimming magnitude')
 fig.savefig(os.path.join(fig_dir,'octant-swim_lateral.png'))
+
+##
+
+# Stats on octant / lateral
+tod_mid_rad=df_start['tod_mid_s'] * 2*np.pi / 86400
+from astropy.stats import rayleightest
+
+# 0.94.
+p_rayleigh_arrival=rayleightest(tod_mid_rad)
+print("Rayleigh statistic for time of day of arrival: %.4f"%p_rayleigh_arrival)
+
+# hmm - so how to translate this to testing whether u_lateral has a diel
+# component?
+# Can I just use u_lateral as the weighting? No, the result is not independent
+# of the mean value.
+# 0.1715
+lateral=df_start['mean_swim_lateral'].values
+
+## What if I brute force it?
+
+lat_vec=np.c_[ np.cos(tod_mid_rad)*lateral,
+               np.sin(tod_mid_rad)*lateral ]
+
+lat_vec_mean=lat_vec.mean(axis=0)
+lat_vec_mag=utils.mag(lat_vec_mean)
+
+
+shuffle_mags=[]
+shuffle_vecs=[]
+N=10000 # should be ~1e2 bigger 
+for _ in range(N):
+    shuffle_rad=np.random.permutation(tod_mid_rad)
+    shuffle_mean=np.mean( np.c_[ np.cos(shuffle_rad)*lateral,
+                                 np.sin(shuffle_rad)*lateral ],
+                          axis=0)
+    shuffle_vecs.append(shuffle_mean)
+    shuffle_mag=utils.mag(shuffle_mean)
+    shuffle_mags.append(shuffle_mag)
+
+shuffle_vecs=np.array(shuffle_vecs)
+
+## 
+plt.figure(1).clf()
+fig,ax=plt.subplots(num=1)
+ax.plot(lat_vec[:,0],lat_vec[:,1],'g+')
+ax.axhline(0,color='k',lw=0.5)
+ax.axvline(0,color='k',lw=0.5)
+
+ax.plot([lat_vec_mean[0]],[lat_vec_mean[1]],'go',zorder=3)
+stride=slice(None,None,N//1000)
+ax.plot(shuffle_vecs[stride,0],shuffle_vecs[stride,1],'ko',alpha=0.1)
+
+mag_sort=np.sort(shuffle_mags)
+
+p=1-np.searchsorted(mag_sort,lat_vec_mag)/float(1+len(mag_sort))
+if mag_sort[-1]<lat_vec_mag:
+    print("p < %.6f"%p)
+else:
+    print("p ~ %.6f"%p)
+
+ax.axis('equal')
+ax.set_adjustable('box')
+ax.axis(xmin=-0.15,xmax=0.15,ymin=-0.15,ymax=0.15)
+fig.savefig(os.path.join(fig_dir,'diel-lateral-scatter.png'),dpi=200)
+
+## 
+# how does that compare to using a multilinear regression?
+# About an order of magnitude difference in p, but
+# whatever.
+# higher order fourier components don't help. Not surprising.
+# the box plot made it looks pretty sinusoidal.
+
+for order in range(1,5):
+    Xcols=[ np.ones( (len(tod_mid_rad),1) )]
+
+    for o in range(order):
+        Xcols.append( np.c_[ np.cos((1+o)*tod_mid_rad),
+                             np.sin((1+o)*tod_mid_rad)] )
+    X=np.concatenate(Xcols,axis=1)
+    Y=lateral
+
+    model=sm.OLS(Y,X).fit()
+
+    print("Order %d, BIC %.3f"%(order,model.bic))
 
 ##
 
@@ -172,7 +269,7 @@ fig=plt.figure(34)
 fig.clf()
 ax=fig.add_subplot(111)
 
-sns.boxplot(x='tod_mid_octant',y='mean_gnd_urel',data=df_start,ax=ax)
+boxplot_n(x='tod_mid_octant',y='mean_gnd_urel',data=df_start,ax=ax)
 ax.set_xlabel('Middle of 3-hour bin (h)')
 ax.set_ylabel('Mean downstream groundspeed')
 fig.savefig(os.path.join(fig_dir,'octant-gnd_urel.png'))
@@ -183,7 +280,7 @@ fig=plt.figure(35)
 fig.clf()
 ax=fig.add_subplot(111)
 
-sns.boxplot(x='tod_mid_octant',y='mean_gnd_mag',data=df_start,ax=ax)
+boxplot_n(x='tod_mid_octant',y='mean_gnd_mag',data=df_start,ax=ax)
 ax.set_xlabel('Middle of 3-hour bin (h)')
 ax.set_ylabel('Mean groundspeed')
 fig.savefig(os.path.join(fig_dir,'octant-gnd_speed.png'))
@@ -194,7 +291,7 @@ fig=plt.figure(36)
 fig.clf()
 ax=fig.add_subplot(111)
 
-sns.boxplot(x='tod_mid_octant',y='mean_model_mag',data=df_start,ax=ax)
+boxplot_n(x='tod_mid_octant',y='mean_model_mag',data=df_start,ax=ax)
 ax.set_xlabel('Middle of 3-hour bin (h)')
 ax.set_ylabel('Mean water speed')
 fig.savefig(os.path.join(fig_dir,'octant-water_speed.png'))
@@ -258,7 +355,7 @@ plt.setp(ax_dens.get_yticklabels(),visible=0)
 
 fig.tight_layout()
 
-# Nothing jumps out, except timimig 
+# Nothing jumps out, except timing 
 fig.savefig(os.path.join(fig_dir,'timeseries-swim_flow_turb.png'))
 
 ##
@@ -323,3 +420,248 @@ fig.savefig(os.path.join(fig_dir,'timeseries-arrival_flow_turb.png'))
 
 # And presence, swimming spatially -- look at screen_track_with_hydro
 # all_segs=
+
+# Seem to have lost my turbidity plots...
+
+# Add turbidity, flow, doy to df_start
+df_start['turb']=np.interp( df_start.t_mid,
+                            utils.to_unix(msd_turb.time.values),msd_turb['turb_lp'].values)
+df_start['flow_m3s']=np.interp( df_start.t_mid,
+                                utils.to_unix(msd_flow.time.values), msd_flow.flow_cfs.values*0.028316847)
+df_start['time_mid']=utils.unix_to_dt64(df_start.t_mid)
+df_start['doy']=df_start.time_mid.dt.dayofyear
+
+##
+
+turb_quant=30.0
+df_start['turb_quant']=np.round(df_start.turb/turb_quant)*turb_quant
+
+fig=plt.figure(40)
+fig.set_size_inches( (4.5,4), forward=True)
+fig.clf()
+fig,axs=plt.subplots(2,1,num=40,sharex=True)
+
+for ax,y in zip(axs,['mean_swim_urel','mean_swim_lateral']):
+    boxplot_n(x='turb_quant',y=y,data=df_start,ax=ax)
+    if y=='mean_swim_urel':
+        ax.set_ylabel('$u_{rel}$ m s$^{-1}$')
+    else:
+        ax.set_ylabel('$|v_{rel}|$ m s$^{-1}$')
+
+axs[0].set_xlabel("")
+axs[1].set_xlabel('Turbidity (ntu), rounded')
+            
+fig.subplots_adjust(left=0.17,top=0.95,right=0.95)
+fig.savefig(os.path.join(fig_dir,'turb-swimming.png'))
+
+##
+
+doy_quant=3.0
+df_start['doy_quant']=np.round(df_start.doy/doy_quant)*doy_quant
+
+fig=plt.figure(41)
+fig.set_size_inches( (4.5,4), forward=True)
+fig.clf()
+fig,axs=plt.subplots(2,1,num=41,sharex=True)
+
+for ax,y in zip(axs,['mean_swim_urel','mean_swim_lateral']):
+    boxplot_n(x='doy_quant',y=y,data=df_start,ax=ax)
+    if y=='mean_swim_urel':
+        ax.set_ylabel('$u_{rel}$ m s$^{-1}$')
+    else:
+        ax.set_ylabel('$|v_{rel}|$ m s$^{-1}$')
+
+axs[0].set_xlabel("")
+axs[1].set_xlabel('Day of year (rounded)')
+            
+fig.subplots_adjust(left=0.17,top=0.95,right=0.95)
+fig.savefig(os.path.join(fig_dir,'doy-swimming.png'))
+
+##
+
+flow_quant=40.0
+df_start['flow_quant']=np.round(df_start.flow_m3s/flow_quant)*flow_quant
+
+fig=plt.figure(42)
+fig.set_size_inches( (4.5,4), forward=True)
+fig.clf()
+fig,axs=plt.subplots(2,1,num=42,sharex=True)
+
+for ax,y in zip(axs,['mean_swim_urel','mean_swim_lateral']):
+    boxplot_n(x='flow_quant',y=y,data=df_start,ax=ax)
+    if y=='mean_swim_urel':
+        ax.set_ylabel('$u_{rel}$ m s$^{-1}$')
+    else:
+        ax.set_ylabel('$|v_{rel}|$ m s$^{-1}$')
+
+axs[0].set_xlabel("")
+axs[1].set_xlabel('Flow (m s$^{-1}$), rounded')
+            
+fig.subplots_adjust(left=0.17,top=0.95,right=0.95,bottom=0.16)
+fig.savefig(os.path.join(fig_dir,'flow-swimming.png'))
+
+##
+
+# Try fitting linear model
+df_to_fit=df_start.loc[:, ['mean_swim_urel','mean_swim_lateral','turb','flow_m3s','doy'] ]
+
+print(f"N = {len(df_start)}")
+
+# Dropped the pandas corr() calls in favor of scipy.stats
+from scipy.stats import spearmanr,kendalltau
+
+for endog in ['mean_swim_urel','mean_swim_lateral']:
+    for exog in ['turb','flow_m3s','doy']:
+        s_corr,s_p=spearmanr(a=df_start[endog],
+                             b=df_start[exog])
+        print("%20s ~ %10s  Spearman rho=%.3f  p-value=%.6f"%(endog, exog, s_corr,s_p))
+        k_corr,k_p=kendalltau(x=df_start[endog],
+                              y=df_start[exog])
+        print("%20s ~ %10s  Kendall corr=%.3f  p-value=%.6f"%("", "", k_corr,k_p))
+
+#       mean_swim_urel ~       turb  Spearman rho=-0.301  p-value=0.000440
+#                      ~             Kendall corr=-0.208  p-value=0.000383
+#       mean_swim_urel ~   flow_m3s  Spearman rho=-0.358  p-value=0.000023
+#                      ~             Kendall corr=-0.247  p-value=0.000026
+#       mean_swim_urel ~        doy  Spearman rho=-0.353  p-value=0.000031
+#                      ~             Kendall corr=-0.255  p-value=0.000037
+#    mean_swim_lateral ~       turb  Spearman rho=-0.023  p-value=0.789033
+#                      ~             Kendall corr=-0.008  p-value=0.897849
+#    mean_swim_lateral ~   flow_m3s  Spearman rho=-0.028  p-value=0.745454
+#                      ~             Kendall corr=-0.013  p-value=0.830579
+#    mean_swim_lateral ~        doy  Spearman rho=-0.059  p-value=0.498501
+#                      ~             Kendall corr=-0.036  p-value=0.562365
+
+##
+import statsmodels.formula.api as smf
+
+# ordered from best BIC to worst
+for formula in ['mean_swim_urel ~ flow_m3s',
+                'mean_swim_urel ~ turb',
+                'mean_swim_urel ~ doy',
+                'mean_swim_urel ~ flow_m3s + doy',
+                'mean_swim_urel ~ flow_m3s + turb',
+                'mean_swim_urel ~ turb + doy',
+                'mean_swim_urel ~ flow_m3s + turb + doy']:
+    mod = smf.ols(formula=formula, data=df_start)
+    res = mod.fit()
+
+    print(f"{formula:40}: R^2={res.rsquared:.3f}   AIC={res.aic:.2f}   BIC={res.bic:.2f}")
+                
+
+
+## 
+model = smf.ols(formula='mean_swim_urel ~ flow_m3s', data=df_start).fit()
+
+# R-squared: 0.104
+print(model.summary())
+
+## 
+# Of the simple linear models, this is the best
+# Scatter plot it
+
+plt.figure(42).clf()
+fig,ax=plt.subplots(1,1,num=42)
+
+ax.plot( df_start['flow_m3s'], df_start['mean_swim_urel'], 'k.')
+pred=model.predict(df_start)
+order=np.argsort(df_start['flow_m3s'].values)
+ax.plot( df_start['flow_m3s'].values[order], pred[order], 'g-')
+
+ax.set_xlabel('Flow (m$^3$ s$^{-1}$)')
+ax.set_ylabel('$u_{rel}$ (m s$^{-1}$)')
+fig.savefig(os.path.join(fig_dir,'scatter-flow-u_rel.png'),dpi=200)
+
+##
+
+# Fits at the sample level, across all tracks, to compare local hydro speed
+# and river flow.
+
+for idx,row in df_start.iterrows():
+    row['track']['id'] = idx
+    row['track']['flow_m3s']=row['flow_m3s']
+    
+seg_tracks=pd.concat( [ track.iloc[:-1,:]
+                        for track in df_start['track'].values ] )
+##
+
+seg_tracks['hydro_speed']=np.sqrt( seg_tracks['model_u'+vel_suffix].values**2 +
+                                   seg_tracks['model_v'+vel_suffix].values**2 )
+seg_tracks['swim_lat']=np.abs(seg_tracks['swim_vrel'])
+
+## 
+# Global relationship between swim speed and hydro speed
+num=51
+plt.figure(num).clf()
+fig,(ax_hydro, ax_flow)=plt.subplots(1,2,num=num)
+fig.set_size_inches((6,2.75),forward=True)
+
+endog=seg_tracks['swim_urel'].values
+
+for ax,exog,exog_label in [
+        (ax_hydro,seg_tracks['hydro_speed'].values,'Hydro speed (m/s)'),
+        (ax_flow, seg_tracks['flow_m3s'].values,   'Flow (m3/s)') ]:
+    ax.plot( exog, endog, '.', color='tab:blue', ms=1,alpha=0.2, zorder=-1)
+    order=np.argsort(exog)
+    N=401
+
+    # No weighting in this version -- see plot_tracks.
+    exog_med=medfilt( exog[order], N)
+    endog_med=medfilt( endog[order], N)
+
+    ax.plot( exog_med[N:-N], endog_med[N:-N], '-',color='k',zorder=1)
+
+    ax.set_xlabel(exog_label)
+    
+    ax.axhline(0,color='k',lw=1.2,zorder=0)
+    ax.axis(ymin=-0.8,ymax=0.8)
+
+ax_hydro.axis(xmin=0,xmax=0.8)
+ax_flow.axis(xmin=40,xmax=250)
+ax_hydro.set_ylabel(r'$lon$ (m/s)')
+plt.setp(ax_flow.get_yticklabels(), visible=0)
+fig.subplots_adjust(left=0.15,right=0.92,top=0.97,bottom=0.18,wspace=0.09)
+
+fig.savefig(os.path.join(fig_dir,'swim_urel-vs-hydro_and_flow.png'),dpi=200)
+
+##     
+# Pearson and Spearman tests:
+df_to_fit=seg_tracks.loc[:, ['swim_urel','swim_lat','hydro_speed','flow_m3s'] ]
+
+##
+
+print(f"N={len(df_to_fit)}")
+selector=['swim_urel','swim_lat'], ['hydro_speed','flow_m3s']
+# Straight linear correlation:
+print("Pearson, linear-----------")
+print(df_to_fit.corr().loc[selector])
+print()
+print("Spearman, rank------------")
+print(df_to_fit.corr(method='spearman').loc[selector])
+#print(df_to_fit.corr(method='kendall'))
+print()
+print("--------------------------")
+
+## linear models
+
+import statsmodels.formula.api as smf
+
+seg_tracks['flow_100m3s']=seg_tracks['flow_m3s']/100.
+
+for formula in [ 'swim_urel ~ hydro_speed',
+                 'swim_urel ~ flow_100m3s',
+                 'swim_urel ~ hydro_speed + flow_100m3s' ]:
+    mod = smf.ols(formula=formula, data=seg_tracks)
+    res = mod.fit()
+    print("-"*50)
+    print("Formula: ",formula)
+    print(f"  R^2: {res.rsquared:.4f}   AIC: {res.aic:.1f} BIC: {res.bic:.1f}")
+    params=res.params
+    conf_ints=res.conf_int()
+    print("  Parameters: ")
+    for pnum,pname in enumerate(mod.exog_names):
+        print(f"    {pname:15}  {params[pname]:.4f}   [{conf_ints.loc[pname,0]:.4f}   {conf_ints.loc[pname,1]:.4f}]")
+    print()
+
+##
+

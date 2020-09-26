@@ -1,3 +1,6 @@
+# This is the file used to create the tracks analyzed in
+# the swim speed paper
+
 library(yaps)
 library(plotrix)
 library("RColorBrewer")
