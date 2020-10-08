@@ -27,8 +27,8 @@ def rx_locations_2019():
     grped=shots.groupby('rx').mean()
     return grped
 
-def rx_locations_2018():
-    shots=pd.read_csv("2018_Data/monitor deployment_swap-sm2-sm3.csv",
+def rx_locations_2018(base_dir="."):
+    shots=pd.read_csv(os.path.join(base_dir,"2018_Data/monitor deployment_swap-sm2-sm3.csv"),
                       names=['shot','y','x','z'],index_col=False)
     shots['rx']=[ rx.split('.')[0].upper() for rx in shots.shot.values]
     grped=shots.groupby('rx').mean()
@@ -516,6 +516,7 @@ class PingMatcher(object):
     max_bad_pings=10
     verbose=False
     max_matches=1 # stop when this many potential sets of matches are found
+    base_dir="."
 
     clipped=None
 
@@ -531,7 +532,8 @@ class PingMatcher(object):
         self.all_detects=[]
         
     def add_detections(self,name,det_fn,**kw):
-        detects=pt.parse_tek(det_fn,name=name,**kw)
+        fn=os.path.join(self.base_dir,det_fn)
+        detects=pt.parse_tek(fn,name=name,**kw)
         if isinstance(detects,list):
             for i,d in enumerate(detects):
                 d['station']=d['name']
@@ -853,7 +855,7 @@ def ping_matcher_2018(**kw):
     
     keywords arguments passed to add_detections()
     """
-    pm=PingMatcher()
+    pm=PingMatcher(base_dir=os.path.dirname(__file__))
     pm.T0=np.datetime64('2018-02-01 00:00')
 
     # 2018 data. no pressure data.
@@ -888,7 +890,7 @@ def ping_matcher_2018(**kw):
     pm.add_detections(name='SM9',det_fn='2018_Data/SM9_20187024/050218/SM12180721837.DET',
                       pressure_range=None,**kw)
 
-    pm.set_rx_locations(rx_locations_2018())
+    pm.set_rx_locations(rx_locations_2018(pm.base_dir))
 
     return pm
 
