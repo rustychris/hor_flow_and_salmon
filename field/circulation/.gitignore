@@ -4,3 +4,5 @@ MSD*.nc
 .ipynb_checkpoints
 .RData
 .Rhistory
+pings*.nc
+yaps-output.zip
