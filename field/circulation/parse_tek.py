@@ -183,6 +183,116 @@ def dbg_to_clock_changes(dbg_filename):
     clock_resets=pd.DataFrame(clock_resets)
     return clock_resets
 
+def rs232_checksum(the_bytes):
+    return '%02X' % (sum(the_bytes.encode()) & 0xFF)
+
+def parse_txt(fn):
+    """
+    Parse a single txt formated Teknologic JSAT receiver file.
+    Returns a pandas DataFrame, with many many fields
+    """
+    recs=[]
+    
+    with open(fn,'rt') as fp:
+        while 1:
+            if len(recs)>0 and len(recs)%1000==0:
+                print(f"{len(recs)} records")
+                
+            rec={}
+            
+            line=fp.readline()
+            if line=="":
+                break
+            else:
+                line=line.strip()
+
+            rec['raw']=line
+                
+            # Checksum:
+            m=re.match('([^#]+),#([0-9A-F][0-9A-F])$',line)
+            if m is not None:
+                calc_sum=rs232_checksum(m.group(1))
+                real_sum=m.group(2)
+                if calc_sum==real_sum:
+                    rec['checksum']=1
+                else:
+                    rec['checksum']=2
+                line=m.group(1)
+            else:
+                rec['checksum']=-1
+
+            # Try the known patterns:
+            # NODE:001,187014,187014,,,SS-187014,20180328,1.098,224613,3748.450199,N,12119.655790,W,8.2,M,09,19.9,13.7,-105,56.9
+            m=re.match('NODE:(.*)',line)
+            if m is not None:
+                rec['type']='NODE'
+                csvs=m.group(1).split(',')
+                (rec['node_serial'],
+                 rec['rx_serial1'],
+                 rec['rx_serial2'],
+                 rec['dum1'],rec['dum2'],rec['rx_serial3'],rec['j_date'],rec['dum3'],rec['j_time'],
+                 rec['lat_dm'],rec['lat_ns'],rec['lon_dm'],rec['lon_ew'],
+                 rec['hdg'],rec['mag'],rec['dum4'],rec['dum5'],rec['dum6'],rec['dum7'],rec['dum8']) = csvs
+            if m is None:
+                #           serial  seq     date_str, STS, key=value
+                m=re.match('[0-9]+,[0-9]+,([-0-9 :]+),STS,[,=A-Z0-9\.]+$',line)
+                # 187014,000,2018-03-13 20:15:01,STS,FW=3.6.64,FPGA=830A,IVDC=4.0,EVDC=0.0,
+                # I=0.023,VDC=17,IDC=0,DU=0,THR=100,BETA=0.760,NBW=28,AUTO=1,TILT=87.0,
+                # PRESS=100801.4,WTEMP=23.4,ITEMP=19.1,#04
+                if m is not None:
+                    rec['type']='STATUS'
+                    csvs=line.split(',')
+                    (rec['rx_serial'],rec['seq'],rec['datetime_str']) = csvs[:3]
+                    # parse comma-separated key=value pairs to dict:
+                    rec.update( {p[0]:p[1] for p in [kv.split('=') for kv in csvs[4:]]} )
+            if m is None:
+                m=re.match('\*.*RTMNOW',line)
+                if m is not None:
+                    rec['type']='RTMNOW'
+            if m is None:
+                m=re.match('\*([0-9]+)\..*TIME=([-0-9 :]+)$',line)
+                #'*187014.1#22,TIME=2018-03-13 20:14:54'
+                if m is not None:
+                    rec['type']='TIME'
+                    rec['rx_serial']=m.group(1)
+                    rec['datetime_str']=m.group(2)
+            if m is None:
+                m=re.match('\*([0-9]+)(\.\d+)[#0-9\[\]]+,(([\.0-9]+),([0-9]),)?OK',line)
+                # Two types: 
+                # *187016.0#23[0020],0.183095,0,OK,#BA
+                #   potential clock resync. 
+                # *<sn> not sure about these, then delta between two clocks in seconds,
+                # then 0 if clock was left, 1 if it was resynced.
+                # OK, and a checksum.
+                # *187014.2#23[0009],OK,#9A
+                #   comes right after an RTMNOW.
+                if m is not None:
+                    rec['rx_serial']=m.group(1)
+                    if m.group(3) is not None:
+                        rec['type']='SYNC'
+                        rec['sync_dt']=float(m.group(4))
+                        rec['sync_status']=int(m.group(5))
+                    else:
+                        rec['type']='OK' # prob. just boot up
+            if m is None:
+                m=re.match('[0-9]+,[0-9]+,([-0-9 :]+),[\.0-9]+,[0-9A-F]+,[0-9]+,[-0-9]+,[0-9]+,[0-9]+,[\.0-9]+',line)
+                if m is not None:
+                    rec['type']='DET'
+                    csvs=line.split(',')
+                    (rec['rx_serial'],rec['seq'],rec['datetime_str'],rec['t_usec'],
+                     rec['tag_id'],rec['dum9'],rec['dum10'],rec['dum11'],
+                     rec['dum12'],rec['dum13'])=csvs
+            if m is None:
+                rec['type']='unknown'
+            
+            recs.append(rec)
+
+    df=pd.DataFrame(recs)
+    df['time']=pd.to_datetime(df['datetime_str'])
+            
+    return df
+
+
 def dice_by_clock_resets(ds,all_clock_resets):
     """
     ds: dataset, as from parse_tek()
