@@ -1,4 +1,4 @@
-serial, station,y_utm,x_utm,date_deployed,date_recovered,notes
+serial,station,y_utm,x_utm,date_deployed,date_recovered,notes
 6006, AM1,4185764.697,647338.258,2/19/2020,5/20/2020,"retrieved lights not blinking, possible dead bat. Towards end of study"
 6006, AM1,4185764.714,647338.267,2/19/2020,5/20/2020,
 6006, AM1,4185764.768,647338.270,2/19/2020,5/20/2020,
@@ -18,8 +18,8 @@ serial, station,y_utm,x_utm,date_deployed,date_recovered,notes
 6005, AM6,4185836.595,647245.715,2/20/2020,NA,Not retrieved
 6005, AM6,4185836.614,647245.707,2/20/2020,NA,Not retrieved
 6002, AM7,4185909.871,647244.225,2/20/2020,5/20/2020,Checked and running 3/3/20  w/ detections
-6003, AM7,4185909.943,647244.261,2/20/2020,5/20/2020,
-6004, AM7,4185909.900,647244.276,2/20/2020,5/20/2020,
+6002, AM7,4185909.943,647244.261,2/20/2020,5/20/2020,
+6002, AM7,4185909.900,647244.276,2/20/2020,5/20/2020,
 7028, SM1,4185736.968,647318.033,3/10/2020,5/19/2020,"All cables cut on shore station at pul out 5/19, ant. and solar replaced 4/8 due to theft."
 7028, SM1,4185737.285,647318.048,3/10/2020,5/19/2020,
 7028, SM1,4185737.368,647317.922,3/10/2020,5/19/2020,
