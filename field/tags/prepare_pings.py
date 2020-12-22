@@ -862,7 +862,7 @@ def ping_matcher_2018(**kw):
     
     keywords arguments passed to add_detections()
     """
-    pm=PingMatcher(base_dir=os.path.dirname(__file__))
+    pm=PingMatcher(base_dir=os.path.join(os.path.dirname(__file__),"../circulation"))
     pm.T0=np.datetime64('2018-02-01 00:00')
 
     # 2018 data. no pressure data.
@@ -902,7 +902,8 @@ def ping_matcher_2018(**kw):
     return pm
 
 def ping_matcher_2020(**kw):
-    pm=PingMatcher(base_dir=os.path.join(os.path.dirname(__file__),"../tags/2020"))
+    pm=PingMatcher(base_dir=os.path.join(os.path.dirname(__file__),
+                                         "2020"))
     pm.T0=np.datetime64('2020-02-01 00:00')
 
     # pressure data?
@@ -942,21 +943,12 @@ def ping_matcher_2020(**kw):
 
     return pm
     
-
-
-if 0:
+if 1:
     # see notes in bayes_v02 on picking up clock resets
-
+    pm=ping_matcher_2020()
+    
     pm_nomp=pm.remove_multipath()
 
-    pm_clip=pm_nomp.clip_time([np.datetime64("2018-03-20 20:00"),
-                               np.datetime64("2018-03-20 22:00")])
-
-    ds_total=pm_clip.match_all()
-
-    ##
-
-    fn=f'pings-{str(pm_clip.clipped[0])}_{str(pm_clip.clipped[1])}.nc'
-    os.path.exists(fn) and os.unlink(fn)
-    ds_total.to_netcdf(fn)
+    pm_clip=pm_nomp.clip_time([np.datetime64("2020-03-01 00:00"),
+                               np.datetime64("2018-03-02 00:00")])
 
