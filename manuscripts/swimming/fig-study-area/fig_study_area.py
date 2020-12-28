@@ -15,7 +15,9 @@ from stompy.plot import plot_wkb, plot_utils
 from stompy.grid import unstructured_grid
 import pandas as pd
 import matplotlib.pyplot as plt
-from matplotlib import cm
+from matplotlib import cm,collections
+
+
 import numpy as np
 from shapely import ops
 ##
@@ -23,8 +25,6 @@ from shapely import ops
 upper_ll=[-120.930408, 37.309940]
 lower_ll=[-121.271098, 37.691794]
 release_xy=proj_utils.mapper('WGS84','EPSG:26910')( [upper_ll,lower_ll] )
-
-    
 
 ##
 
@@ -78,7 +78,11 @@ sfe_geom=sfe_geom.union( river_poly )
 
 ##
 
-zoom=(646818.0, 648074.0, 4185291.632, 4186257.632)
+#zoom=(646818.0, 648074.0, 4185291.632, 4186257.632)
+zoom=(646837., 648093., 4185330., 4186296.)
+
+ax_props=dict(fontsize=9)
+overview_props=dict(fontsize=9)
 
 fig=plt.figure(1)
 fig.clf()
@@ -111,7 +115,7 @@ img.set_clim([-8,4])
 
 ac=aerial.crop(clip).plot(ax=ax,zorder=-2)
 
-grid.plot_edges(lw=0.5,color='k',alpha=0.3,ax=ax)
+grid_coll=grid.plot_edges(lw=0.5,color='k',alpha=0.3,ax=ax)
 
 cbar=plt.colorbar(img,cax=cax,label='Bathymetry (m NAVD88)',
                   orientation='horizontal')
@@ -128,7 +132,7 @@ leg_ax.legend(loc='upper left',
               bbox_to_anchor=[0,0.95],
               handles=ax.lines)
 
-overview_ax=fig.add_axes([0.63,0.55,0.37,0.45])
+overview_ax=fig.add_axes([0.58,0.45,0.42,0.55])
 
 plot_wkb.plot_wkb(sfe_geom,ax=overview_ax,facecolor='0.5',edgecolor='0.5',lw=0.2)
     
@@ -144,10 +148,27 @@ overview_ax.plot( [x], [y], 'r*',ms=7)
 overview_ax.plot( [ release_xy[0,0]], [release_xy[0,1]],'bv')
 overview_ax.plot( [ release_xy[1,0]], [release_xy[1,1]],'bv')
 overview_ax.annotate("Upper\nrelease", release_xy[0,:] + np.r_[-5000,0],
-                     ha='right')
+                     ha='right',**overview_props)
 overview_ax.annotate("Lower\nrelease", release_xy[1,:] + np.r_[-4000,0],
-                     ha='right',va='top')
-overview_ax.annotate( "Study\nsite", [x+6000,y])
+                     ha='right',va='top',**overview_props)
+overview_ax.annotate( "Study\nsite", [x+6000,y],**overview_props)
+
+overview_ax.annotate("Chipps\nIsland",
+                     xy=[595218, 4212542.],
+                     xytext=[575000, 4235500.],
+                     arrowprops=dict(arrowstyle="->"),
+                     **overview_props)
+
+overview_ax.annotate("Pacific\n Ocean",
+                     xy=[532589, 4125054],
+                     **overview_props)
+
+overview_ax.text=[]
+overview_ax.annotate("Water\nproject\nintakes",
+                     xy=[624818, 4186745.],
+                     xytext=[584000, 4176000.],
+                     arrowprops=dict(arrowstyle="->"),
+                     **overview_props)
 
 overview_ax.axis( (527837., 690000., 4131000., 4269000) )
 
@@ -155,22 +176,95 @@ overview_ax.axis( (527837., 690000., 4131000., 4269000) )
 # Better done in inkscape, but try it here...
 ax.texts=[]
 ax.text(647780, 4185550.,r'$\leftarrow$ San Joaquin R.',
-        rotation=18.,fontsize=11)
+        rotation=18.,**ax_props)
 
 ax.text(646865, 4185800.,r'$\leftarrow$ Old R.',
-        rotation=0.,fontsize=11)
+        rotation=0.,**ax_props)
 
 ax.text(647300, 4185950.,r'San Joaquin R. $\rightarrow$',
-        rotation=40.,fontsize=11)
+        rotation=40.,**ax_props)
 
-plot_utils.scalebar([0.55,0.03],dy=0.02,L=500,ax=ax,
-                    fractions=[0,0.2,0.4,1.0],
+sbar=plot_utils.scalebar([0.55,0.03],dy=0.02,L=500,ax=ax,
+                         fractions=[0,0.2,0.4,1.0],
+                         label_txt='m',
+                         style='ticks',
+                         lw=1.25,
+                         xy_transform=ax.transAxes)
+
+fig.savefig('fig_study_area.png',dpi=200)
+
+##
+
+# Additional versions for presentation
+grid_coll.set_visible(0)
+fig.savefig('fig_study_area-no_grid.png',dpi=200)
+
+##
+
+grid_coll.set_visible(1)
+overview_ax.set_visible(0)
+ax.lines[0].set_visible(0)
+fig.savefig('fig_study_area-no_overview.png',dpi=200)
+ax.lines[0].set_visible(1)
+
+##
+
+ax.lines[0].set_visible(0)
+
+# Replace scalebar with smaller one:
+lines,texts=sbar
+for l in lines:
+    if l in ax.collections:
+        ax.collections.remove(l)
+for t in texts:
+    if t in ax.texts:
+        ax.texts.remove(t)
+
+ax.axis( (647134.9801316926, 647313.3037316924, 4185782.897096002, 4185920.069096002) )
+sbar=plot_utils.scalebar([0.03,0.9],dy=0.02,L=50,ax=ax,
+                    fractions=[0,0.25,0.5,1.0],
                     label_txt='m',
                     style='ticks',
                     lw=1.25,
                     xy_transform=ax.transAxes)
 
-fig.savefig('fig_study_area.png',dpi=200)
+cax.set_visible(0)
+leg_ax.set_visible(0)
+grid_coll.set_alpha(0.8)
+fig.savefig('grid-only-zoom.png',dpi=150)
+
+cax.set_visible(1)
+leg_ax.set_visible(1)
+grid_coll.set_alpha(0.3)
+
+##
+
+# Add in transect locations, zoom in
+adcp_transects=wkb2shp.shp2geom("../../../gis/transects_2018.shp")
+tran_segs=[ np.array(geom) for geom in adcp_transects['geom']]
+tran_lcoll=collections.LineCollection(tran_segs,color='k',lw=1.2)
+ax.add_collection(tran_lcoll)
+overview_ax.set_visible(0)
+
+# Replace scalebar with smaller one:
+lines,texts=sbar
+for l in lines:
+    if l in ax.collections:
+        ax.collections.remove(l)
+for t in texts:
+    if t in ax.texts:
+        ax.texts.remove(t)
+        
+sbar=plot_utils.scalebar([0.03,0.9],dy=0.02,L=200,ax=ax,
+                    fractions=[0,0.25,0.5,1.0],
+                    label_txt='m',
+                    style='ticks',
+                    lw=1.25,
+                    xy_transform=ax.transAxes)
+
+ax.axis( (646964., 647585., 4185571., 4186048.) )
+
+fig.savefig('fig_study_area-adcp_transects.png',dpi=200)
 
 ##
 

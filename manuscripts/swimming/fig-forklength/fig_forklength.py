@@ -15,7 +15,7 @@ tags['release']=[s.upper()[:8] for s in tags['Rel_group']]
 sns.kdeplot( tags.loc[ tags.release=='SJSCARF1', 'Length'], ax=ax,label='Upper', shade=True)
 sns.kdeplot( tags.loc[ tags.release=='SJSCARF2', 'Length'], ax=ax,label='Lower', shade=True)
 
-ax.set_ylabel("Density")
+ax.set_ylabel("Frequency")
 ax.set_xlabel("Fork length (mm)")
 ax.axis(xmin=68,xmax=87)
 ax.legend(loc='upper right',title='Release')

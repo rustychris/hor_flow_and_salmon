@@ -405,6 +405,10 @@ def dice_by_clock_resets(ds,all_clock_resets):
      as from dbg_to_clock_changes()
     returns: list of xr.Dataset
     """
+    if len(all_clock_resets)==0 or 'fpga_pre' not in all_clock_resets.columns:
+        print("No DBG clock resets data")
+        return [ds]
+    
     # Get rid of clock resets that are entirely before or entirely after
     # the pings
     t_min=ds.time.values.min()
@@ -443,7 +447,7 @@ def dice_by_clock_resets(ds,all_clock_resets):
                 # No exact match, so try allowing for inexact pre data.
                 for r_idx,rec in clock_resets.iterrows():
                     if ( (rec['fpga_pre'] < rec['fpga_pre']) or
-                         ('SYNC' in rec['msg_pre']) or
+                         (rec['msg_pre'] is not None and 'SYNC' in rec['msg_pre']) or
                          (reset_to_break[r_idx]>=0)):
                         continue # only looking for unmatched, inexact, backward jumps
                     if rec['fpga_post']<ds_times[i]:

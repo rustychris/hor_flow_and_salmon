@@ -11,6 +11,7 @@ import six
 from stompy import utils
 
 import parse_tek as pt
+six.moves.reload_module(pt)
 
 ##
 
@@ -35,9 +36,11 @@ def rx_locations_2018(base_dir="."):
     return grped
 
 def rx_locations_2020(base_dir="."):
-    shots=pd.read_csv('2020_survey_in.csv')
+    shots=pd.read_csv(os.path.join(base_dir,'2020_survey_in.csv'))
     shots['station']=shots.station.str.strip()
     grped=shots.groupby('station').mean()
+    grped=grped.rename(columns={'x_utm':'x','y_utm':'y'})
+    grped['z']=np.nan
     # stations are capitalized, like 'SM10'
     return grped
 
@@ -920,20 +923,21 @@ def ping_matcher_2020(**kw):
     # pm.add_detections(name='AM7',det_fn='2020HOR DLs/AM7-186002/am18-6002200511023.DET',**kw)
 
     # SM1: Cables cut, and solar panel replaced 4/8.
-    pm.add_detections(name='SM1',det_fn='sm1_187028/sm18-7028200550942.DET',**kw)
+    pm.add_detections(name='SM1',det_fn='2020HOR DLs/sm1_187028/sm18-7028200550942.DET',**kw)
     # SM2: had hydrophone cable cut.
-    pm.add_detections(name='SM2',det_fn='SM2_187020/sm18-7020200551256.DET',**kw)
-    pm.add_detections(name='SM3',det_fn='sm3_187015/20187015200561353.DET',**kw)
-    pm.add_detections(name='SM4',det_fn='sm4_ 187025/2018-7025200621322.DET',**kw)
+    pm.add_detections(name='SM2',det_fn='2020HOR DLs/SM2_187020/sm18-7020200551256.DET',**kw)
+    # SM3: very few detections, empty DBG file.
+    pm.add_detections(name='SM3',det_fn='2020HOR DLs/sm3_187015/20187015200561353.DET',**kw)
+    pm.add_detections(name='SM4',det_fn='2020HOR DLs/sm4_ 187025/2018-7025200621322.DET',**kw)
     
     # 7023 isn't in the list of Deployment shots. Note on SM4 says 7025 was
     # deployed 3/10 to replace 7023 which wasn't working well.
-    pm.add_detections(name='SM4a',det_fn='sm_187023/sm18-7023200551121.DET',**kw)
+    pm.add_detections(name='SM4a',det_fn='2020HOR DLs/sm_187023/sm18-7023200551121.DET',**kw)
 
     # SM5: no files or listed in GPS data.
-    pm.add_detections(name='SM6',det_fn='sm6_187017/sm18-7017200551604.DET',**kw)
+    pm.add_detections(name='SM6',det_fn='2020HOR DLs/sm6_187017/sm18-7017200551604.DET',**kw)
     # SM7: no files or listed in GPS data
-    pm.add_detections(name='SM8',det_fn='sm8_187019/sm18-7019200411537.DET',**kw)
+    pm.add_detections(name='SM8',det_fn='2020HOR DLs/sm8_187019/sm18-7019200411537.DET',**kw)
 
     # SM9: stolen. serial 7016
     # SM10: stolen. serial 7014

@@ -18,7 +18,7 @@ from scipy import signal
 
 vel_suffix='_top2m'
 
-fig_dir="fig_analysis-20200924"+vel_suffix
+fig_dir="fig_analysis-20201015"+vel_suffix
 if not os.path.exists(fig_dir):
     os.makedirs(fig_dir)
 
@@ -386,12 +386,21 @@ plt.setp(ax_dens.get_yticklabels(),visible=0)
 # fig.autofmt_xdate()
 # ax.axhline(0.0,color='0.6',lw=1.0)
 
-# MSD flows
-msd_flow=fetch_and_parse(local_file="env_data/msd/flow-2018.csv",
-                         url="http://wdl.water.ca.gov/waterdatalibrary/docs/Hydstra/docs/B95820Q/2018/FLOW_15-MINUTE_DATA_DATA.CSV",
-                         skiprows=3,parse_dates=['time'],names=['time','flow_cfs','quality','notes'])
+## MSD flows
+utils.path("../../model/suntans")
+import common
 
-ax2.plot(msd_flow.time,msd_flow.flow_cfs,label='MSD Flow (cfs)')
+dates=dict(start_date=np.datetime64("2018-03-01"),
+           end_date=np.datetime64("2018-04-15"))
+
+msd_flow=common.msd_flow(**dates)
+msd_velo=common.msd_velocity(**dates)
+
+# msd_flow=fetch_and_parse(local_file="env_data/msd/flow-2018.csv",
+#                          url="http://wdl.water.ca.gov/waterdatalibrary/docs/Hydstra/docs/B95820Q/2018/FLOW_15-MINUTE_DATA_DATA.CSV",
+#                          skiprows=3,parse_dates=['time'],names=['time','flow_cfs','quality','notes'])
+
+ax2.plot(msd_flow.time,msd_flow.flow_m3s,label='MSD Flow (m$^3$s)')
 ax_dens.axis(xmin=times.min(), xmax=times.max())
 
 msd_turb=cdec.cdec_dataset('MSD',times.min(),times.max(),sensor=27,
@@ -427,7 +436,9 @@ fig.savefig(os.path.join(fig_dir,'timeseries-arrival_flow_turb.png'))
 df_start['turb']=np.interp( df_start.t_mid,
                             utils.to_unix(msd_turb.time.values),msd_turb['turb_lp'].values)
 df_start['flow_m3s']=np.interp( df_start.t_mid,
-                                utils.to_unix(msd_flow.time.values), msd_flow.flow_cfs.values*0.028316847)
+                                utils.to_unix(msd_flow.time.values), msd_flow.flow_m3s)
+df_start['velo_ms']=np.interp( df_start.t_mid,
+                               utils.to_unix(msd_velo.time.values), msd_velo.velocity_ms)
 df_start['time_mid']=utils.unix_to_dt64(df_start.t_mid)
 df_start['doy']=df_start.time_mid.dt.dayofyear
 
@@ -503,7 +514,7 @@ fig.savefig(os.path.join(fig_dir,'flow-swimming.png'))
 ##
 
 # Try fitting linear model
-df_to_fit=df_start.loc[:, ['mean_swim_urel','mean_swim_lateral','turb','flow_m3s','doy'] ]
+df_to_fit=df_start.loc[:, ['mean_swim_urel','mean_swim_lateral','turb','flow_m3s','velo_ms','doy'] ]
 
 print(f"N = {len(df_start)}")
 
@@ -511,36 +522,53 @@ print(f"N = {len(df_start)}")
 from scipy.stats import spearmanr,kendalltau
 
 for endog in ['mean_swim_urel','mean_swim_lateral']:
-    for exog in ['turb','flow_m3s','doy']:
+    for exog in ['turb','flow_m3s','doy','velo_ms']:
         s_corr,s_p=spearmanr(a=df_start[endog],
                              b=df_start[exog])
         print("%20s ~ %10s  Spearman rho=%.3f  p-value=%.6f"%(endog, exog, s_corr,s_p))
-        k_corr,k_p=kendalltau(x=df_start[endog],
-                              y=df_start[exog])
-        print("%20s ~ %10s  Kendall corr=%.3f  p-value=%.6f"%("", "", k_corr,k_p))
+        # k_corr,k_p=kendalltau(x=df_start[endog],
+        #                       y=df_start[exog])
+        # print("%20s ~ %10s  Kendall corr=%.3f  p-value=%.6f"%("", "", k_corr,k_p))
+    print()
 
-#       mean_swim_urel ~       turb  Spearman rho=-0.301  p-value=0.000440
-#                      ~             Kendall corr=-0.208  p-value=0.000383
-#       mean_swim_urel ~   flow_m3s  Spearman rho=-0.358  p-value=0.000023
-#                      ~             Kendall corr=-0.247  p-value=0.000026
-#       mean_swim_urel ~        doy  Spearman rho=-0.353  p-value=0.000031
-#                      ~             Kendall corr=-0.255  p-value=0.000037
-#    mean_swim_lateral ~       turb  Spearman rho=-0.023  p-value=0.789033
-#                      ~             Kendall corr=-0.008  p-value=0.897849
-#    mean_swim_lateral ~   flow_m3s  Spearman rho=-0.028  p-value=0.745454
-#                      ~             Kendall corr=-0.013  p-value=0.830579
-#    mean_swim_lateral ~        doy  Spearman rho=-0.059  p-value=0.498501
-#                      ~             Kendall corr=-0.036  p-value=0.562365
+# This used to yield the best correlation with flow, then doy, and turb trailing
+# But with the updated (cfg10->cfg12) hydro, and clipping tracks above the junction,
+# it's now a tossup.
+#  N = 121
+#        mean_swim_urel ~       turb  Spearman rho=-0.319  p-value=0.000368
+#        mean_swim_urel ~   flow_m3s  Spearman rho=-0.315  p-value=0.000430
+#        mean_swim_urel ~        doy  Spearman rho=-0.338  p-value=0.000149
+#        mean_swim_urel ~    velo_ms  Spearman rho=-0.300  p-value=0.000844
+#  
+#     mean_swim_lateral ~       turb  Spearman rho=0.000  p-value=0.999353
+#     mean_swim_lateral ~   flow_m3s  Spearman rho=-0.053  p-value=0.560852
+#     mean_swim_lateral ~        doy  Spearman rho=-0.047  p-value=0.612347
+#     mean_swim_lateral ~    velo_ms  Spearman rho=-0.048  p-value=0.603427
 
 ##
+def stand(x):
+    return (x-x.min()) / (x.max()-x.min())
+
+plt.figure(50).clf()
+plt.plot( df_start.time_mid, stand(df_start.turb), '.', color='tab:brown',label='Turbidity')
+plt.plot( df_start.time_mid, stand(df_start.flow_m3s), '.', color='tab:blue',label='Flow')
+plt.plot( df_start.time_mid, stand(df_start.velo_ms), '.', color='tab:green',label='Velo')
+plt.plot( df_start.time_mid, stand(df_start.doy), '.', color='tab:red',label='Day of year')
+
+plt.plot( df_start.time_mid, 1-stand(df_start.mean_swim_urel), 'o', color='k')
+plt.legend()
+
+##
+
 import statsmodels.formula.api as smf
 
-# ordered from best BIC to worst
+# ordered from best BIC (most negative) to worst (least negative)
 for formula in ['mean_swim_urel ~ flow_m3s',
                 'mean_swim_urel ~ turb',
                 'mean_swim_urel ~ doy',
-                'mean_swim_urel ~ flow_m3s + doy',
+                'mean_swim_urel ~ velo_ms',
                 'mean_swim_urel ~ flow_m3s + turb',
+                'mean_swim_urel ~ flow_m3s + doy',
                 'mean_swim_urel ~ turb + doy',
                 'mean_swim_urel ~ flow_m3s + turb + doy']:
     mod = smf.ols(formula=formula, data=df_start)
@@ -548,12 +576,10 @@ for formula in ['mean_swim_urel ~ flow_m3s',
 
     print(f"{formula:40}: R^2={res.rsquared:.3f}   AIC={res.aic:.2f}   BIC={res.bic:.2f}")
                 
-
-
 ## 
 model = smf.ols(formula='mean_swim_urel ~ flow_m3s', data=df_start).fit()
 
-# R-squared: 0.104
+# R-squared: 0.086
 print(model.summary())
 
 ## 
@@ -580,10 +606,11 @@ fig.savefig(os.path.join(fig_dir,'scatter-flow-u_rel.png'),dpi=200)
 for idx,row in df_start.iterrows():
     row['track']['id'] = idx
     row['track']['flow_m3s']=row['flow_m3s']
+    row['track']['velo_ms']=row['velo_ms']
+    row['track']['turb']=row['turb']
     
 seg_tracks=pd.concat( [ track.iloc[:-1,:]
                         for track in df_start['track'].values ] )
-##
 
 seg_tracks['hydro_speed']=np.sqrt( seg_tracks['model_u'+vel_suffix].values**2 +
                                    seg_tracks['model_v'+vel_suffix].values**2 )
@@ -626,12 +653,10 @@ fig.savefig(os.path.join(fig_dir,'swim_urel-vs-hydro_and_flow.png'),dpi=200)
 
 ##     
 # Pearson and Spearman tests:
-df_to_fit=seg_tracks.loc[:, ['swim_urel','swim_lat','hydro_speed','flow_m3s'] ]
-
-##
+df_to_fit=seg_tracks.loc[:, ['swim_urel','swim_lat','hydro_speed','flow_m3s','velo_ms','turb'] ]
 
 print(f"N={len(df_to_fit)}")
-selector=['swim_urel','swim_lat'], ['hydro_speed','flow_m3s']
+selector=['swim_urel','swim_lat'], ['hydro_speed','flow_m3s','velo_ms','turb']
 # Straight linear correlation:
 print("Pearson, linear-----------")
 print(df_to_fit.corr().loc[selector])
@@ -644,24 +669,72 @@ print("--------------------------")
 
 ## linear models
 
+# What about decomposing velocity using river flow?
+mb=np.polyfit( seg_tracks.velo_ms.values, seg_tracks.hydro_speed.values,1)
+
+vel_anom=seg_tracks.hydro_speed.values - np.polyval(mb,seg_tracks.velo_ms.values)
+
+plt.figure(50).clf()
+fig,ax=plt.subplots(num=50)
+
+ax.plot( seg_tracks.tnum, seg_tracks.velo_ms,'g.',label='River velocity (m/s)')
+ax.plot( seg_tracks.tnum, seg_tracks.hydro_speed,'b.',label='Local velocity (m/s)')
+ax.plot( seg_tracks.tnum, vel_anom, '.',color='orange',label='Local velocity anom.')
+
+seg_tracks['hydro_anom']=vel_anom
+##
+
 import statsmodels.formula.api as smf
 
 seg_tracks['flow_100m3s']=seg_tracks['flow_m3s']/100.
 
+results=[]
 for formula in [ 'swim_urel ~ hydro_speed',
-                 'swim_urel ~ flow_100m3s',
-                 'swim_urel ~ hydro_speed + flow_100m3s' ]:
+                 'swim_urel ~ velo_ms',
+                 'swim_urel ~ turb',
+                 'swim_urel ~ hydro_speed + turb',                 
+                 'swim_urel ~ hydro_speed + velo_ms',
+                 'swim_urel ~ turb + velo_ms',
+                 'swim_urel ~ hydro_speed + turb + velo_ms',
+                 # 'swim_urel ~ flow_100m3s',
+                 #'swim_urel ~ hydro_anom',
+                 # 'swim_urel ~ hydro_anom + velo_ms',
+                 #'swim_urel ~ hydro_speed + flow_100m3s'
+]:
     mod = smf.ols(formula=formula, data=seg_tracks)
     res = mod.fit()
+    results.append(res)
+
+order=np.argsort( [res.bic for res in results] )
+recs=[] # assemble a results dataframe while we're at it.
+for idx in order:
+    res=results[idx]
     print("-"*50)
-    print("Formula: ",formula)
-    print(f"  R^2: {res.rsquared:.4f}   AIC: {res.aic:.1f} BIC: {res.bic:.1f}")
+    print("Formula: ",res.model.formula)
+    print(f"  R^2: {res.rsquared:.4f}   AIC: {res.aic:.1f} BIC: {res.bic:.1f}  f-pvalue {res.f_pvalue:.2e} n={res.nobs:g}")
     params=res.params
     conf_ints=res.conf_int()
     print("  Parameters: ")
-    for pnum,pname in enumerate(mod.exog_names):
+    for pnum,pname in enumerate(res.model.exog_names):
         print(f"    {pname:15}  {params[pname]:.4f}   [{conf_ints.loc[pname,0]:.4f}   {conf_ints.loc[pname,1]:.4f}]")
     print()
 
+    recs.append( dict( idx=idx, formula=res.model.formula,
+                      rsq=res.rsquared, aic=res.aic, bic=res.bic,
+                      p_value=res.f_pvalue, n=res.nobs ) )
+
 ##
 
+fits=pd.DataFrame(recs)
+
+ffits=fits.loc[:,['formula','rsq','bic']].copy()
+ffits['rsq']=ffits['rsq'].apply(lambda x: "%.4f"%x)
+ffits['bic']=ffits['bic'].apply(lambda x: "%.0f"%x)
+ffits['formula']=ffits['formula'].apply(lambda x: x.replace('swim_urel ~ ',''))
+
+ffits.rename({'formula':'Model',
+              'rsq':'R^2',
+              'bic':'BIC'},
+             inplace=True,axis=1)
+print(ffits)
+#print( fits.style.format({'rsq': '{:.4f}', 'bic': '{:.0f}'}) )
