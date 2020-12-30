@@ -62,6 +62,23 @@ for idx,rec in df.iterrows():
         exit_t=np.nan
     df_ptm.loc[idx,'route']=route
     df_ptm.loc[idx,'exit_time']=exit_t
-    
-df_ptm.to_csv("screen_final-ptm_inputs-20201228.csv",index=False)
+
+##
+
+# 20201230: Rename the epoch timestamps, and make the
+# entry_time and exit_time as string datetimes in PST.
+
+df_ptm2=df_ptm.copy()
+utc_to_pst=np.timedelta64(-8,'h')
+
+for t_col in ['entry_time','exit_time','first_detection_time']:
+    epo_col=t_col.replace('_time','_utc_epoch')
+    pst_col=t_col+"_pst"
+    df_ptm2[epo_col]=df_ptm2[t_col]
+    df_ptm2[pst_col] = utc_to_pst + utils.unix_to_dt64(df_ptm2[epo_col].round())
+    del df_ptm2[t_col]
+
+##
+
+df_ptm2.to_csv("screen_final-ptm_inputs-20201230.csv",index=False)
 
