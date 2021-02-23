@@ -17,7 +17,6 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib import cm,collections
 
-
 import numpy as np
 from shapely import ops
 ##
@@ -50,32 +49,60 @@ rx_locs=pd.read_csv("../../../field/hor_yaps/yap-positions.csv")
 
 ##
 
+# Legal delta boundary:
+delta_bdry=wkb2shp.shp2geom("../../../gis/Legal_Delta_Boundary.shp",
+                            target_srs='EPSG:26910')['geom'][0]
+
+
+##
 ca_shp=wkb2shp.shp2geom("../../../gis/CA_State/CA_State_TIGER2016.shp",
                         target_srs='EPSG:26910')
 
 ##
+from stompy.spatial import wkb2shp
 
-sfe_poly=wkb2shp.shp2geom("../../../gis/dem_to_shoreline/shoreline_from_dem.shp")
+if 0: # Is the cascade grid of any use here?
+    cgrid=unstructured_grid.UnstructuredGrid.read_dfm("../../../../cascade/rmk_validation_setups/wy2011/r18b_net.nc")
+    cgrid_poly=cgrid.boundary_polygon()
+    wkb2shp.wkb2shp('r18b_net_outline.shp',[cgrid_poly],overwrite=True)
+if 0:
+    sfbo_grid=unstructured_grid.UnstructuredGrid.read_ugrid("../../../../sfb_ocean/suntans/grid-merge-suisun/splice-merge-05-filled-edit70.nc")
+    sfbo_poly=sfbo_grid.boundary_polygon()
+    wkb2shp.wkb2shp('sfb_ocean_outline.shp',[sfbo_poly],overwrite=True)
+if 0:
+    csc_grid=unstructured_grid.UnstructuredGrid.read_ugrid("../../../../csc/grid/CacheSloughComplex_v111-edit21.nc")
+    csc_poly=csc_grid.boundary_polygon()
+    wkb2shp.wkb2shp('csc_outline.shp',[csc_poly],overwrite=True)
+if 0:
+    sfe_poly=wkb2shp.shp2geom("../../../gis/dem_to_shoreline/shoreline_from_dem.shp")
+    # Extend further into ocean
+    ca_mpoly=ca_shp['geom'][0].buffer(-5556)
+    ocean_poly=ca_mpoly.envelope.difference(ca_mpoly)
+    sfe_geom = sfe_poly['geom'][0].union(ocean_poly)
 
-# Extend further into ocean
-ca_mpoly=ca_shp['geom'][0].buffer(-5556)
-ocean_poly=ca_mpoly.envelope.difference(ca_mpoly)
+if 0:
+    # Extend SJ River
+    ca_rivers=wkb2shp.shp2geom("../../../gis/CA_State/hydro/CaliforniaHydro.shp",
+                               target_srs='EPSG:26910')
+    sel=(ca_rivers['NAME']=='San Joaquin River') # |(ca_rivers['NAME']=='Sacramento River')
+    river_geoms=ca_rivers['geom'][sel]
+    
+    river_polys=[g.buffer(50.0,resolution=4) for g in river_geoms]
+    river_poly=ops.cascaded_union(river_polys)
 
-sfe_geom = sfe_poly['geom'][0].union(ocean_poly)
+    sfe_geom = sfe_poly['geom'][0].union(ocean_poly)
+
+    # Get rid of small channels
+    sfe_geom2=sfe_geom.buffer(-10,resolution=4).buffer(10,resolution=4)
+
+    sfe_geom3=sfe_geom2.union( river_poly )
 
 ##
 
-# Extend SJ River
-ca_rivers=wkb2shp.shp2geom("../../../gis/CA_State/hydro/CaliforniaHydro.shp",
-                           target_srs='EPSG:26910')
-sel=(ca_rivers['NAME']=='San Joaquin River') # |(ca_rivers['NAME']=='Sacramento River')
-river_geoms=ca_rivers['geom'][sel]
-
-river_polys=[g.buffer(50.0,resolution=4) for g in river_geoms]
-river_poly=ops.cascaded_union(river_polys)
-
-sfe_geom=sfe_geom.union( river_poly )
-
+# Editing all done in QGIS project. Load final result:
+shore=wkb2shp.shp2geom('../../../gis/compiled_shoreline.shp')
+sfe_geom=shore['geom'][0]
+    
 ##
 
 #zoom=(646818.0, 648074.0, 4185291.632, 4186257.632)
@@ -134,7 +161,8 @@ leg_ax.legend(loc='upper left',
 
 overview_ax=fig.add_axes([0.58,0.45,0.42,0.55])
 
-plot_wkb.plot_wkb(sfe_geom,ax=overview_ax,facecolor='0.5',edgecolor='0.5',lw=0.2)
+plot_wkb.plot_wkb(sfe_geom,
+                  ax=overview_ax,facecolor='#2d74ad',edgecolor='#2d74ad',lw=0.2)
     
 overview_ax.axis('equal')
 overview_ax.xaxis.set_visible(0)
@@ -162,6 +190,18 @@ overview_ax.annotate("Chipps\nIsland",
 overview_ax.annotate("Pacific\n Ocean",
                      xy=[532589, 4125054],
                      **overview_props)
+
+# And gauge locations:
+# SJD, HOR, MSD
+# 
+MSD_ll=[-121.306,37.786]
+SJD_ll=[-121.317724,37.822331]
+OH1_ll=[-121.331253051758,37.8075523376465]
+gauge_ll=np.array([ MSD_ll, SJD_ll, OH1_ll])
+gauge_xy=proj_utils.mapper('WGS84','EPSG:26910')(gauge_ll)
+
+overview_ax.plot( gauge_xy[:,0], gauge_xy[:,1],'g.')
+ax.plot( gauge_xy[:,0], gauge_xy[:,1],'g.')
 
 overview_ax.text=[]
 overview_ax.annotate("Water\nproject\nintakes",
@@ -191,9 +231,53 @@ sbar=plot_utils.scalebar([0.55,0.03],dy=0.02,L=500,ax=ax,
                          lw=1.25,
                          xy_transform=ax.transAxes)
 
+plot_wkb.plot_wkb(delta_bdry,ax=overview_ax,
+                  fc='0.85', ec='0.7',ls='-',lw=0.5,zorder=-2)
+
+## 
 fig.savefig('fig_study_area.png',dpi=200)
 
 ##
+
+# Drop some of the text and save pieces to put this together in
+# inkscape
+
+# Background:
+plt.setp( ax.texts[:3], visible=False)
+overview_ax.set_visible(False)
+leg_ax.set_visible(False)
+cax.set_visible(False)
+#fig.savefig('fig_study_area-ax.svg')
+fig.savefig('fig_study_area-ax.pdf') # seems to import ok.  used 'internal' pdf import
+#fig.savefig('fig_study_area-ax.png',dpi=200)
+
+## Inset:
+plt.setp( ax.texts[:3], visible=False)
+overview_ax.set_visible(True)
+leg_ax.set_visible(False)
+ax.set_visible(False)
+cax.set_visible(False)
+#fig.savefig('fig_study_area-ax.svg')
+
+# Drop the texts
+plt.setp(overview_ax.texts,visible=False)
+# Change all markers to small dots. 
+plt.setp(overview_ax.lines,marker='.',ms=2)
+
+extent = overview_ax.get_window_extent().transformed(fig.dpi_scale_trans.inverted())
+fig.savefig('fig_study_area-overview.pdf',bbox_inches=extent) 
+
+## 
+
+overview_ax.set_visible(False)
+leg_ax.set_visible(True)
+cax.set_visible(True)
+
+extent = leg_ax.get_window_extent().transformed(fig.dpi_scale_trans.inverted())
+fig.savefig('fig_study_area-legend.pdf',bbox_inches=extent) 
+
+##
+
 
 # Additional versions for presentation
 grid_coll.set_visible(0)
