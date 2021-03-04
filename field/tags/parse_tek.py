@@ -10,7 +10,9 @@ from stompy import utils
 
 
 def parse_tek(det_fn,cf2_fn=None,name=None,pressure_range=[110e3,225e3],
-              auto_beacon=True,split_on_clock_change=True):
+              auto_beacon=True,split_on_clock_change=True,
+              time_range=[np.datetime64('2018-01-01'),
+                          np.datetime64('2022-01-01')]):
     """
     det_fn: path to DET file with detection information
     cf2_fn: optional, read beacon id from CF2 file.  Will attempt to
@@ -22,6 +24,8 @@ def parse_tek(det_fn,cf2_fn=None,name=None,pressure_range=[110e3,225e3],
      the most common received tag as the beacon id.
     split_on_clock_change: if true, return a list of datasets, split up based on
       when logs indicated that the clock was updated.
+    time_range: if specified, a start/stop datetime64 used to exclude known bad
+      data. Defaults to very broad range to reject mis-parsed or mangled dates.
     """
     if cf2_fn is None:
         fn=det_fn.replace('.DET','.CF2')
@@ -38,7 +42,7 @@ def parse_tek(det_fn,cf2_fn=None,name=None,pressure_range=[110e3,225e3],
     df['time'] = utils.unix_to_dt64(df['epoch'] + df['usec']*1e-6)
         
     # clean up time:
-    bad_time= (df.time<np.datetime64('2018-01-01'))|(df.time>np.datetime64('2022-01-01'))
+    bad_time= (df.time<time_range[0])|(df.time>time_range[1])
     df2=df[~bad_time].copy()
 
     # clean up temperature:
@@ -303,10 +307,13 @@ def parse_txt(fn):
     return df
 
 def parse_txts(txt_fns,pressure_range=[110e3,225e3],
-               name=None,auto_beacon=True,split_on_clock_change=True):
+               name=None,beacon='auto',split_on_clock_change=True):
     """
     Parse a collection of txt files, grab detections and optionally
     clock resync events.
+    beacon: 'auto' set beacon tag id from most commonly received tag id.
+       None: don't set a beacon tag id
+       else: use the provided value as the beacon id.
     """
     txt_fns=list(txt_fns)
     txt_fns.sort()
@@ -326,8 +333,11 @@ def parse_txts(txt_fns,pressure_range=[110e3,225e3],
         # just a NODE bootup msg anyway.
         log.warning("%d unknown line types in txt files"%n_unknown)
 
-    # Do we need epoch?
-    #df['epoch']=utils.to_unix(df['time'])
+    # Do we need epoch? yes, it's used downstream
+    epoch=utils.to_unix(df['time'].values)
+    # It will get usec added, so be sure it's just the integer portion.
+    assert np.all( (epoch%1.0)[np.isfinite(epoch)] == 0)
+    df['epoch']=epoch
 
     # Add microseconds to timestamps when t_usec is available
     sel=np.isfinite(df.t_usec.values)
@@ -355,19 +365,30 @@ def parse_txts(txt_fns,pressure_range=[110e3,225e3],
     df3['tag']=[ s.strip() for s in df3.tag.values ]
 
     # narrow that to the fields we actually care about:
-    fields=['rx_serial','tag','time','t_usec',
+    fields=['rx_serial','tag','time','t_usec','epoch',
             'corrQ','nbwQ','pressure','temp',
             'datetime_str','fn']
 
     ds=xr.Dataset.from_dataframe(df3.loc[:,fields])
+    ds['usec']=ds['t_usec']
 
-    if auto_beacon:
+    ds['cf2_filename']=None
+
+    if beacon=='auto':
         beacon_id=df3.groupby('tag').size().sort_values().index[-1]
         ds['beacon_id']=beacon_id
-        ds['cf2_filename']=None
         ds['beacon_id'].attrs['source']='received tags'
-
+        print("auto_beacon: beacon_id inferred as ",beacon_id)
+        # import pdb
+        # pdb.set_trace()
+    elif beacon is not None:
+        ds['beacon_id']=beacon
+        ds['beacon_id'].attrs['source']='Specified to parse_txts'
+        
     ds.attrs['pressure_range']=pressure_range
+
+    if name is not None:
+        ds['name']=(),name
     
     if split_on_clock_change:
         # dice_by_clock_resets got crazy complicated.  Rather than

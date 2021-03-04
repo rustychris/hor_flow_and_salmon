@@ -1,9 +1,8 @@
 """
 Pull out just the ping matching code
-
 """
 
-import os
+import os, glob
 import pandas as pd
 import numpy as np
 import xarray as xr
@@ -15,7 +14,7 @@ six.moves.reload_module(pt)
 
 ##
 
-def rx_locations_2019():
+def rx_locations_2019(base_dir="."):
     # Need utm for each of the 12 receivers.
     # 'SM8', 'SM7', 'SM4', 'SM3', 'SM2', 'AM9', 'AM7', 'AM6', 'AM4',
     # 'AM3', 'AM2', 'AM1'
@@ -29,7 +28,7 @@ def rx_locations_2019():
     return grped
 
 def rx_locations_2018(base_dir="."):
-    shots=pd.read_csv(os.path.join(base_dir,"2018_Data/monitor deployment_swap-sm2-sm3.csv"),
+    shots=pd.read_csv(os.path.join(base_dir,"2018/monitor deployment_swap-sm2-sm3.csv"),
                       names=['shot','y','x','z'],index_col=False)
     shots['rx']=[ rx.split('.')[0].upper() for rx in shots.shot.values]
     grped=shots.groupby('rx').mean()
@@ -44,6 +43,16 @@ def rx_locations_2020(base_dir="."):
     # stations are capitalized, like 'SM10'
     return grped
 
+def rx_locations(year,base_dir="."):
+    if year==2018:
+        return rx_locations_2018(base_dir=base_dir)
+    if year==2019:
+        return rx_locations_2019(base_dir=base_dir)
+    if year==2020:
+        return rx_locations_2020(base_dir=base_dir)
+    else:
+        raise Exception("Bad year - %s"%year)
+    
 ## 
 if 0: # 2019 data:
     rx_locations=rx_locations_2019()
@@ -541,9 +550,19 @@ class PingMatcher(object):
         utils.set_keywords(self,kw)
         self.all_detects=[]
         
-    def add_detections(self,name,det_fn,**kw):
-        fn=os.path.join(self.base_dir,det_fn)
-        detects=pt.parse_tek(fn,name=name,**kw)
+    def add_detections(self,name,det_fn=None,txt_patt=None,**kw):
+        """
+        Parse detections and include in the PingMatcher.
+        det_fn: Parse downloaded data that has .DET (and .DBG) files
+        txt_patt: glob pattern for parsing .txt files (as saved to the cloud).
+        """
+        if det_fn is not None:
+            fn=os.path.join(self.base_dir,det_fn)
+            detects=pt.parse_tek(fn,name=name,**kw)
+        elif txt_patt is not None:
+            txt_fns=glob.glob(os.path.join(self.base_dir,txt_patt))
+            detects=pt.parse_txts(txt_fns,name=name,**kw)
+            
         if isinstance(detects,list):
             for i,d in enumerate(detects):
                 d['station']=d['name']
@@ -767,7 +786,7 @@ class PingMatcher(object):
 
         # Filter down to rx that actually have some pings
         dss=[ds for ds in self.all_detects if ds.dims['index']]
-
+        print(f"{len(dss)} rx datasets (including time resets)")
         while len(dss)>1:
             Ndet=len(dss)
 
@@ -873,31 +892,31 @@ def ping_matcher_2018(**kw):
     # in DBG, NoiseAlpha=0xFFBE. probably not useful.
     # AM2 should be FF08, based on hearing itself.
 
-    pm.add_detections(name='AM1',det_fn='2018_Data/AM1_20186009/050318/AM1180711347.DET',
+    pm.add_detections(name='AM1',det_fn='2018/AM1_20186009/050318/AM1180711347.DET',
                       pressure_range=None,**kw)
-    pm.add_detections(name='AM2',det_fn='2018_Data/AM2_20186008/043018/AM2180711401.DET',
+    pm.add_detections(name='AM2',det_fn='2018/AM2_20186008/043018/AM2180711401.DET',
                       pressure_range=None,**kw)
-    pm.add_detections(name='AM3',det_fn='2018_Data/AM3_20186006/043018/2018-6006180621239.DET',
+    pm.add_detections(name='AM3',det_fn='2018/AM3_20186006/043018/2018-6006180621239.DET',
                       pressure_range=None,**kw)
-    pm.add_detections(name='AM4',det_fn='2018_Data/AM4_20186005/050118/2018-6005180671524.DET',
+    pm.add_detections(name='AM4',det_fn='2018/AM4_20186005/050118/2018-6005180671524.DET',
                       pressure_range=None,**kw)
-    pm.add_detections(name='AM5',det_fn='2018_Data/AM5_20186004/050318/2018-6004180671635.DET',
+    pm.add_detections(name='AM5',det_fn='2018/AM5_20186004/050318/2018-6004180671635.DET',
                       pressure_range=None,**kw)
-    pm.add_detections(name='AM8',det_fn='2018_Data/AM8_20186002/043018/2018-6002180401450.DET',
+    pm.add_detections(name='AM8',det_fn='2018/AM8_20186002/043018/2018-6002180401450.DET',
                       pressure_range=None,**kw)
-    pm.add_detections(name='AM9',det_fn='2018_Data/AM9_20186001/043018/AM9180711355.DET',
+    pm.add_detections(name='AM9',det_fn='2018/AM9_20186001/043018/AM9180711355.DET',
                       pressure_range=None,**kw)
-    pm.add_detections(name='SM1',det_fn='2018_Data/SM1_20187013/050218/SM1180711252.DET',
+    pm.add_detections(name='SM1',det_fn='2018/SM1_20187013/050218/SM1180711252.DET',
                       pressure_range=None,**kw)
-    pm.add_detections(name='SM2',det_fn='2018_Data/SM2_20187014/050218/SM2180711257.DET',
+    pm.add_detections(name='SM2',det_fn='2018/SM2_20187014/050218/SM2180711257.DET',
                       pressure_range=None,**kw)
-    pm.add_detections(name='SM3',det_fn='2018_Data/SM3_20187015/SM3180711301.DET',
+    pm.add_detections(name='SM3',det_fn='2018/SM3_20187015/SM3180711301.DET',
                       pressure_range=None,**kw)
-    pm.add_detections(name='SM4',det_fn='2018_Data/SM4_20187018/050218/SM6180711928.DET',
+    pm.add_detections(name='SM4',det_fn='2018/SM4_20187018/050218/SM6180711928.DET',
                       pressure_range=None,**kw)
-    pm.add_detections(name='SM8',det_fn='2018_Data/SM8_20187017/050218/SM5180711921.DET',
+    pm.add_detections(name='SM8',det_fn='2018/SM8_20187017/050218/SM5180711921.DET',
                       pressure_range=None,**kw)
-    pm.add_detections(name='SM9',det_fn='2018_Data/SM9_20187024/050218/SM12180721837.DET',
+    pm.add_detections(name='SM9',det_fn='2018/SM9_20187024/050218/SM12180721837.DET',
                       pressure_range=None,**kw)
 
     pm.set_rx_locations(rx_locations_2018(pm.base_dir))
@@ -912,9 +931,13 @@ def ping_matcher_2020(**kw):
     # pressure data?
     # are beacon ids good?
     # 2020HOR DLs
+    print("AM1")
     pm.add_detections(name='AM1',det_fn='2020HOR DLs/AM1-186006/am18-6006200271152.DET',**kw)
+    print("AM2")
     pm.add_detections(name='AM2',det_fn='2020HOR DLs/AM2-186004/am18-6004200451144.DET',**kw)
+    print("AM3")
     pm.add_detections(name='AM3',det_fn='2020HOR DLs/AM3-186007/am18-6007200481152.DET',**kw)
+    print("AM4")
     pm.add_detections(name='AM4',det_fn='2020HOR DLs/AM4-186003/am18-6003200501643.DET',**kw)
 
     # Survey data also has AM5, AM6
@@ -923,36 +946,125 @@ def ping_matcher_2020(**kw):
     # pm.add_detections(name='AM7',det_fn='2020HOR DLs/AM7-186002/am18-6002200511023.DET',**kw)
 
     # SM1: Cables cut, and solar panel replaced 4/8.
+    print("SM1")
     pm.add_detections(name='SM1',det_fn='2020HOR DLs/sm1_187028/sm18-7028200550942.DET',**kw)
     # SM2: had hydrophone cable cut.
+    print("SM2")    
     pm.add_detections(name='SM2',det_fn='2020HOR DLs/SM2_187020/sm18-7020200551256.DET',**kw)
     # SM3: very few detections, empty DBG file.
+    print("SM3")
     pm.add_detections(name='SM3',det_fn='2020HOR DLs/sm3_187015/20187015200561353.DET',**kw)
-    pm.add_detections(name='SM4',det_fn='2020HOR DLs/sm4_ 187025/2018-7025200621322.DET',**kw)
+
+    print("SM4")
+    # SM4 creates huge huge numbers of resets. Looks like the internal clocks go bad around
+    # 2020-04-12, and from then on the clock is reset every few minutes.
+    pm.add_detections(name='SM4',det_fn='2020HOR DLs/sm4_ 187025/2018-7025200621322.DET',
+                      time_range=[np.datetime64('2020-03-10'),
+                                  np.datetime64('2020-04-11')],
+                      **kw)
     
     # 7023 isn't in the list of Deployment shots. Note on SM4 says 7025 was
     # deployed 3/10 to replace 7023 which wasn't working well.
+    print("SM4a")
     pm.add_detections(name='SM4a',det_fn='2020HOR DLs/sm_187023/sm18-7023200551121.DET',**kw)
 
     # SM5: no files or listed in GPS data.
+    print("SM6")
     pm.add_detections(name='SM6',det_fn='2020HOR DLs/sm6_187017/sm18-7017200551604.DET',**kw)
     # SM7: no files or listed in GPS data
+    print("SM8")
     pm.add_detections(name='SM8',det_fn='2020HOR DLs/sm8_187019/sm18-7019200411537.DET',**kw)
 
     # SM9: stolen. serial 7016
     # SM10: stolen. serial 7014
     # SM11: stolen. serial 7024
-
+    print("SM9")
+    pm.add_detections(name='SM9',txt_patt='dropbox/187016/*.txt',**kw)
+    # 10 and 11 are both coming up with sync tag FF14.
+    # SM11 receives FF14 more than SM10, and receives FF24 less often
+    # than SM10.  Assume that SM10 should in fact be FF24.
+    print("SM10")
+    pm.add_detections(name='SM10',txt_patt='dropbox/187014/*.txt',
+                      beacon='FF24',**kw)
+    print("SM11") 
+    pm.add_detections(name='SM11',txt_patt='dropbox/187024/*.txt',**kw)
+    
     pm.set_rx_locations(rx_locations_2020(pm.base_dir))
 
     return pm
-    
-if 1:
-    # see notes in bayes_v02 on picking up clock resets
+
+
+if 0:
     pm=ping_matcher_2020()
     
     pm_nomp=pm.remove_multipath()
 
-    pm_clip=pm_nomp.clip_time([np.datetime64("2020-03-01 00:00"),
-                               np.datetime64("2018-03-02 00:00")])
+    pm_clip=pm_nomp.clip_time([np.datetime64("2020-03-20 00:00"),
+                               np.datetime64("2020-03-20 06:00")])
+
+    # 20210104: That was giving 1040 entries in pm_clip.all_detects
+    # mostly from SM4.  Added a layer of explicit time clipping to
+    # toss SM4 data after 4/12, when its clock started going haywire.
+
+##
+if 0:
+    # Try this as a starting point. If the reported offsets are large,
+    # we'll have to do something like this before feeding to
+    # YAPS. If small, can probably send to yaps, and sync pings
+    # separately.
+    pm_clip.verbose=False
+    pm_clip.max_shift=30.0 
+    matched=pm_clip.match_all_by_similarity()
+
+    # This test only had 6 receivers (maybe too early).
+    # but the worst clock offset was just 6.2s.
+
+    stretch=np.nanmax(matched['matrix'],axis=1) - np.nanmin(matched['matrix'],axis=1)
+
+    print(f"Biggest clock offset for a single ping: {stretch.max():.3f}s")
+
+##
+if 0:
+    # Will match ai=17 bi=19 with best possible length of 48449
+    # nope.
+    dss=[ds for ds in pm_clip.all_detects if ds.dims['index']]
+
+    ds_a=dss[17]
+    ds_b=dss[19]
+
+    ##
+
+    # Based on the temperature data, seems like they are within 5 minutes
+    # of each other.
+    # Based on pressure data they might be off by as little as 7 seconds.
+    plt.figure(1).clf()
+
+    #plt.plot(ds_a.time,ds_a.temp,label='A')
+    #plt.plot(ds_b.time,ds_b.temp+0.35,label='B')
+    plt.plot(ds_a.time,ds_a.pressure,label='A')
+    plt.plot(ds_b.time,ds_b.pressure,label='B')
+    plt.legend(loc='lower right')
+
+
+    press_a=ds_a.set_coords('time')['pressure']
+    press_b=ds_b.set_coords('time')['pressure']
+
+    # -7 s
+    lag=utils.find_lag_xr(press_a,press_b)
+
+    # robust? yes.
+    print( utils.find_lag_xr(press_a,press_b[20000:]) / np.timedelta64(1,'s') )
+
+    ## 
+
+    # So what do the tag parts look like?
+
+    ds_a['tagn']=pm_clip.tag_to_num(ds_a.tag.values)
+    ds_b['tagn']=pm_clip.tag_to_num(ds_b.tag.values)
+
+    ## 
+
+    # How often do they hear each other?
+    # (ds_a.tag==ds_b.beacon_id).sum() # 16k
+    # (ds_b.tag==ds_a.beacon_id).sum() # 18k
 
