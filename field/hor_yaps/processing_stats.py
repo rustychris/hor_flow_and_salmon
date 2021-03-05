@@ -3,6 +3,7 @@ Generate some summary numbers from the ping processing for
 the swimspeed manuscript
 """
 import os
+import numpy as np
 import pandas as pd
 from shapely import geometry
 from stompy.grid import unstructured_grid
@@ -13,13 +14,13 @@ import six
 ## 
 # From sync_pings
 data_dirs=[
-        'yaps/full/20180313T1900-20180316T0152',
-        'yaps/full/20180316T0152-20180321T0003',
-        'yaps/full/20180321T0003-20180326T0000',
-        'yaps/full/20180326T0000-20180401T0000',
-        'yaps/full/20180401T0000-20180406T0000',
-        'yaps/full/20180406T0000-20180410T0000',
-        'yaps/full/20180410T0000-20180415T0100'
+        'yaps/full/2018/20180313T1900-20180316T0152',
+        'yaps/full/2018/20180316T0152-20180321T0003',
+        'yaps/full/2018/20180321T0003-20180326T0000',
+        'yaps/full/2018/20180326T0000-20180401T0000',
+        'yaps/full/2018/20180401T0000-20180406T0000',
+        'yaps/full/2018/20180406T0000-20180410T0000',
+        'yaps/full/2018/20180410T0000-20180415T0100'
 ]
 
 dfs=[ pd.read_csv(os.path.join(data_dir,'all_detections.csv'))
@@ -53,13 +54,87 @@ print(f"Detections from non-sync tags: {len(df_nonhydro)}")
 fish_tags_df=pd.read_excel("../circulation/2018_Data/2018FriantTaggingCombined.xlsx")
 fish_tags=fish_tags_df['TagID_Hex'].values
 
+# Tracking down the issue with 772A and 82A4: they are both listed in the upper
+# and lower releases.
+# Not enough information to 100% confirm, but 7B51 and 7DAB are not in the
+# the xlsx file, yet have very realistic, fish-y tracks.  So maybe the duplicate
+# 772A and 82A4 are in fact 7B51 and 7DAB.
+# I've arbitrarily replace duplicates in the xlsx with 7B51 and 7DAB (and
+# added a comment to that effect to the xlsx cells).
+
+if 0:
+    # This has some tags that weren't fish (e.g. drifters)
+    taglist=pd.read_csv("../circulation/2018_Data/2018FriantTagList.csv")
+    # np.setdiff1d( taglist.TagID_Hex.values, fish_tags_df.TagID_Hex.values)
+    # These are tag-ids in the csv that do not show up in the xlsx.
+    #   '6EA2', '6FD5', '722A', '726D', '7295', '729B', '72A4', '72BA',
+    #   '72D4', '7354', '7357', '746A', '746B', '74A5', '74AC', '7505',
+    #   '7513', '752D', '752F', '753B', '7541', '756F', '7592', '7594',
+    #   '75B2', '75B9', '75BB', '762B', '7649', '7669', '76A2', '76E9',
+    #   '7757', '7959', '7A4D', '7A59', '7A75', '7A9B', '7AD2', '7B4A',
+    #   '7B51', '7B52', '7B5B', '7B95', '7D4A', '7DAB', '8254', '8256',
+    #   '82A5', '82AA', '82CA', '82DA', '8352', '8355', 'unknown'
+
+    # Anybody one digit off from 772A or 82A4?
+    # '722A'
+    # '72A4'
+    # '8254'
+    # '82A5'
+    # '82AA'
+    # Do any of those have extra info in the csv? nope.
+
+    # And do they have any detects? nope.
+    for maybe_fish in ['722A', '72A4', '8254', '82A5', '82AA']:
+        print(maybe_fish)
+        print( df_nonhydro[ df_nonhydro.tag==maybe_fish ] )
+
+    ## check the whole list then.
+    for maybe_fish in np.setdiff1d( taglist.TagID_Hex.values,
+                                    fish_tags_df.TagID_Hex.values):
+        sel=(df_nonhydro.tag==maybe_fish)
+        hits=sel.sum()
+        if hits:
+            print(maybe_fish,hits)
+            times=df_nonhydro[sel].epo.values
+            print(utils.unix_to_dt64(times.min()),
+                  utils.unix_to_dt64(times.max()))
+
+    # Potential tags and corresponding ping count in df_nonhydro,
+    # dropping two that are noted as drifters.
+    # 7B51 127 -- does come up with a track -- could be real.
+    #             comes through 3/25.
+    # 7DAB 142 -- has a track -- looks real
+    #             comes through 3/28
+
+##     
 df_fish=df_nonhydro[ df_nonhydro.tag.isin(fish_tags) ]
 
 print(f"Detections from known fish tags: {len(df_fish)}")
-# Detections from known fish tags: 147991
+
+# Detections from known fish tags: 148260
 
 print("Unique fish tags received: ",len(df_fish.tag.unique()))
-# Unique fish tags received:  346
+# Unique fish tags received:  348
+
+## Label those by release, and write out to csv for use in timeline
+# figure
+
+grps=df_fish.groupby('tag')
+df_detects=grps.first()
+del df_detects['serial']
+del df_detects['frac']
+df_detects['tag']=df_detects.index
+
+upper=fish_tags_df['Release Date'] < np.datetime64("2018-03-04")
+lower=~upper # some NaT, mostly 2018-03-15
+fish_tags_df['release']=np.where(upper,"upper","lower")
+
+df_detect_w_release=df_detects.merge( fish_tags_df[ ['TagID_Hex','release']],
+                                      left_index=True,right_on='TagID_Hex',
+                                      how='left')
+df_detect_w_release=df_detect_w_release.set_index('tag')
+df_detect_w_release.to_csv("tag-detections_w_release.csv")
+
 
 ##
 

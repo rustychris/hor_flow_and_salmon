@@ -1,6 +1,6 @@
 # This is the file used to create the tracks analyzed in
 # the swim speed paper
-
+  
 library(yaps)
 library(plotrix)
 library("RColorBrewer")
@@ -57,70 +57,90 @@ plotYapsEllipses <- function(inp,yaps_out,focal_tag=""){
   legend(x="topright", legend = labels, col=cols, pch=20,title="# recv")
 }
 
-# optionally use pre-calculated positions
-pre_hydros<-data.table::fread('yap-positions.csv')
-
 serial_blacklist=c()
 
 force_tags<-TRUE
 presync<-TRUE
 
-if(FALSE){
-  period_dir<-'yaps/full/20180313T1900-20180316T0152'
-  fixed_hydros <- NULL # c(5,6) # AM5.0, AM8.8 ?
-  time_keeper_idx <- 6 # AM8.8 -- first one to start
-}
-if(FALSE){
- period_dir<-'yaps/full/20180316T0152-20180321T0003'
- fixed_hydros <- NULL #c(5,6) # AM5.0, AM8.8 ?
- time_keeper_idx <- 6 # AM8.8 -- first one to start
-}
-# An attempt to run 25 days never finished.
-# Running 5 days with just two fixed hydros and 
-# bumping the n_offset/day to 8 never finished.
-# What if I fix more hydros?
-if(FALSE){
-  period_dir<-'yaps/full/20180321T0003-20180326T0000'
-  fixed_hydros <- NULL # c(5,6) # AM5.0, AM8.8
-  time_keeper_idx <- 6 
-}
+year<-2020
 
-if(FALSE){
-    period_dir<-'yaps/full/20180326T0000-20180401T0000'
-  fixed_hydros <- NULL # c(5,6)
-  time_keeper_idx <- 6
-}
+if( year==2018 ) {
+  # optionally use pre-calculated positions
+  pre_hydros<-data.table::fread('yap-positions-2018.csv')
+    
+  if(FALSE){
+    period_dir<-'yaps/full/20180313T1900-20180316T0152'
+    fixed_hydros <- NULL # c(5,6) # AM5.0, AM8.8 ?
+    time_keeper_idx <- 6 # AM8.8 -- first one to start
+  }
+  if(FALSE){
+    period_dir<-'yaps/full/20180316T0152-20180321T0003'
+    fixed_hydros <- NULL #c(5,6) # AM5.0, AM8.8 ?
+    time_keeper_idx <- 6 # AM8.8 -- first one to start
+  }
+  # An attempt to run 25 days never finished.
+  # Running 5 days with just two fixed hydros and 
+  # bumping the n_offset/day to 8 never finished.
+  # What if I fix more hydros?
+  if(FALSE){
+    period_dir<-'yaps/full/20180321T0003-20180326T0000'
+    fixed_hydros <- NULL # c(5,6) # AM5.0, AM8.8
+    time_keeper_idx <- 6 
+  }
 
-if(TRUE){
-  # with everybody fixed, the initial go at v04 had
-  # some large-ish errors in the sync.
-  # only 4 tracks, so maybe not a big deal.
-  period_dir<-'yaps/full/20180401T0000-20180406T0000'
-  fixed_hydros <-NULL #  c(5,6)
-  time_keeper_idx <- 6
-}
+  if(FALSE){
+      period_dir<-'yaps/full/20180326T0000-20180401T0000'
+    fixed_hydros <- NULL # c(5,6)
+    time_keeper_idx <- 6
+  }
+  
+  if(TRUE){
+    # with everybody fixed, the initial go at v04 had
+    # some large-ish errors in the sync.
+    # only 4 tracks, so maybe not a big deal.
+    period_dir<-'yaps/full/20180401T0000-20180406T0000'
+    fixed_hydros <-NULL #  c(5,6)
+    time_keeper_idx <- 6
+  }
+  
+  if(FALSE){
+    period_dir<-'yaps/full/20180406T0000-20180410T0000'
+    fixed_hydros <- NULL #   c(5,6)
+    time_keeper_idx <- 6
+  }
 
-if(FALSE){
-  period_dir<-'yaps/full/20180406T0000-20180410T0000'
-  fixed_hydros <- NULL #   c(5,6)
-  time_keeper_idx <- 6
-}
-
-if(FALSE) {
-  # First go, this yielded some really bad sync errors, and just
-  # a couple of bad tracks.  Try again.
-  # Hydro 7 appears to be the bad guy
-  period_dir<-'yaps/full/20180410T0000-20180415T0100'
-  serial_blacklist <- c("AM9.0")
-  fixed_hydros <- NULL # c(5,6)
-  time_keeper_idx <- 6
+  if(FALSE) {
+    # First go, this yielded some really bad sync errors, and just
+    # a couple of bad tracks.  Try again.
+    # Hydro 7 appears to be the bad guy
+    period_dir<-'yaps/full/20180410T0000-20180415T0100'
+    serial_blacklist <- c("AM9.0")
+    fixed_hydros <- NULL # c(5,6)
+    time_keeper_idx <- 6
+  }
+  n_offset_day<-8
+  n_ss_day<-8
+  
+} else if (year==2020 ){
+  presync<-FALSE
+  pre_hydros<-NULL    
+  period_dir<-'yaps/full/2020/20200317T0000-20200317T0600'
+  fixed_hydros <- c(1,6) # total guess.  
+  time_keeper_idx <- 4 # An autonomous site, AM4
+  # Any more luck when using a smaller number of offsets and
+  # soundspeeds? still failed with 2 and 2
+  # doesn't run at all with 1.
+  n_offset_day<-3
+  n_ss_day<-3
 }
 
 # careful parsing missing sync_tag here
 # also, any sync_tag that is not received by at least 3 rxs (self+2)  
 # at least once, causes issues. Those have been filtered out upstream.
 hydros<-data.table::fread(file.path(period_dir,"hydros.csv"),fill=TRUE,na.strings=c(""))
-
+# These may come in nan, and will cause issues in the minimization.
+hydros$z[] <- 0.0
+  
 if(presync) {
   all_detections<-data.table::fread(file.path(period_dir,"all_detections_sync.csv"),fill=TRUE)
 } else {
@@ -162,12 +182,14 @@ if ( ! dir.exists(out_dir)) {
 
 sync_fn=file.path(out_dir,'sync_save')
 
+# Should rename this... no longer 2018 specific.
 beacon2018<-c()
 beacon2018$hydros <- hydros
 beacon2018$detections <- all_detections
 
 # Process tags:
 fish_tags<-setdiff( unique(all_detections$tag), hydros$sync_tag)
+
 
 if ( !presync ) {
   if ( !file.exists(sync_fn) ) {
@@ -177,8 +199,8 @@ if ( !presync ) {
                            min_hydros = 3, 
                            time_keeper_idx = time_keeper_idx,
                            fixed_hydros_idx = fixed_hydros, # maybe need to avoid SM9, which has no sync tag?
-                           n_offset_day = 8,
-                           n_ss_day = 8)
+                           n_offset_day = n_offset_day,
+                           n_ss_day = n_ss_day)
     
     sync_model <- getSyncModel(inp_sync,silent=FALSE)
     save(sync_model,file=sync_fn)

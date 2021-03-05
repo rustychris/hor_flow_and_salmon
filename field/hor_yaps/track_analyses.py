@@ -18,7 +18,7 @@ from scipy import signal
 
 vel_suffix='_top2m'
 
-fig_dir="fig_analysis-20201015"+vel_suffix
+fig_dir="fig_analysis-20210305"+vel_suffix
 if not os.path.exists(fig_dir):
     os.makedirs(fig_dir)
 
@@ -147,12 +147,15 @@ fig.savefig(os.path.join(fig_dir,'diel-presence-bar.png'))
 
 ## 
 
-def boxplot_n(x,y,data,**kw):
+def boxplot_n(x,y,data,fs=12,**kw):
     ax=sns.boxplot(x=x,y=y,data=data,**kw)
     # show N for each:
     for grp_i,(xval,grp) in enumerate(data.groupby(x)[y]):
-        ax.text( grp_i, grp.median(), "%d"%(grp.count()), ha='center',fontsize=12,
+        q25=grp.quantile(0.25)
+        q75=grp.quantile(0.75)
+        ax.text( grp_i, 0.5*(q25+q75), "%d"%(grp.count()), ha='center',fontsize=fs,
                  color='w',va='center')
+        
 ##    
 fig=plt.figure(32)
 fig.clf()
@@ -178,6 +181,66 @@ boxplot_n(x='tod_mid_octant',y='mean_swim_lateral',data=df_start,ax=ax)
 ax.set_xlabel('Middle of 3-hour bin (h)')
 ax.set_ylabel('Mean lateral swimming magnitude')
 fig.savefig(os.path.join(fig_dir,'octant-swim_lateral.png'))
+
+##
+
+# Manuscript figure [diel]
+# Two panels, combining figure 32 and 33 above.
+fig=plt.figure(132)
+fig.set_size_inches([6.5,2.8],forward=True)
+fig.clf()
+fig,axs=plt.subplots(1,2,num=132)
+
+# Longitudinal
+# bin by 3 hour chunks
+boxplot_n(x='tod_mid_octant',y='mean_swim_urel',data=df_start,ax=axs[0],
+          fs=fs,color='0.5')
+axs[0].set_xlabel('Time of day')
+axs[0].set_ylabel('Longitudinal velocity (m s$^{-1}$)')
+
+fs=8.5
+
+# Lateral
+df_start['tod_mid_octant']=1.5 + 3*np.floor(df_start['tod_mid_s']/(3*3600.))
+boxplot_n(x='tod_mid_octant',y='mean_swim_lateral',data=df_start,ax=axs[1],
+          fs=fs,color='0.5')
+
+for ax in axs:
+    plt.setp(ax.lines,color='k')
+    plt.setp(ax.texts,fontweight='bold')
+    
+axs[1].set_xlabel('Time of day')
+axs[1].set_ylabel('Lateral speed (m s$^{-1}$)')
+
+tod_labels=["01:30","04:30","07:30","10:30",
+            "13:30","16:30","19:30","22:30"]
+for ax in axs:
+    ax.set_xticklabels(tod_labels)
+    plt.setp(ax.get_xticklabels(),rotation=90,ha='center',va='top',
+             fontsize=fs)
+    plt.setp(ax.get_yticklabels(),fontsize=fs)
+    plt.setp( [ax.xaxis.get_label(), ax.yaxis.get_label()],
+              fontsize=fs)
+    plt.setp(ax.texts,fontsize=fs)
+    ax.yaxis.labelpad = 0 # a little tighter
+    ax.xaxis.labelpad = 8 # a little extra
+    ax.spines['top'].set_visible(0)
+    ax.spines['right'].set_visible(0)
+    
+    
+axs[0].text(0.02,1.,"(a)",transform=axs[0].transAxes,va='top')
+axs[1].text(0.02,1.,"(b)",transform=axs[1].transAxes,va='top')
+
+axs[1].axis(ymin=0.0,ymax=0.25) # makes space for the (b)
+axs[0].axis(ymin=-0.45,ymax=0.45)
+
+fig.subplots_adjust(bottom=0.25,top=0.98,right=0.98,left=0.10,
+                    wspace=0.28)
+# Caption:
+#  Time are centers of 3 h bins.
+fig.savefig(os.path.join(fig_dir,'octant-swim_longitudinal_lateral-bw.png'),
+            dpi=200)
+
 
 ##
 
