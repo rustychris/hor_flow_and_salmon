@@ -47,12 +47,23 @@ def get_wdl_stage(*a,**kw):
     data_ds['stage_m']=data_ds['value']*0.3048
     return data_ds
 
+def get_wdl_velocity(*a,**kw):
+    data_ds=get_wdl(*a,**kw)
+    data_ds['velocity_ms']=data_ds['value']*0.3048
+    return data_ds
+
 def msd_flow(start_date,end_date):
     flow=get_wdl_flow(start_date,end_date,
                       local_file="msd-flow-2018.csv",
                       url=("http://wdl.water.ca.gov/waterdatalibrary/docs/Hydstra/"
                            "docs/B95820Q/2018/FLOW_15-MINUTE_DATA_DATA.CSV") )
     return flow
+
+def msd_velocity(start_date,end_date):
+    return get_wdl_velocity(start_date,end_date,
+                            local_file="msd-velocity-2018.csv",
+                            url=("https://wdlstorageaccount.blob.core.windows.net/continuousdata/"
+                                 "docs/B95820Q/2018/VELOCITY_DATA.CSV"))
 
 def sjd_flow(start_date,end_date):
     flow=get_wdl_flow(start_date,end_date,

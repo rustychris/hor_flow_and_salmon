@@ -37,7 +37,7 @@ track_common.clip_to_analysis_polygon(df,'track')
 
 ##
 # matches folder in track_analyses
-fig_date="2020917"
+fig_date="20201010"
 
 # For plots that are not tied to a specific velocity (see end of this file)
 fig_dir_gen="fig_analysis-"+fig_date
@@ -169,6 +169,8 @@ fig.savefig(os.path.join(fig_dir,"all_segments-weight_by_time.png"))
 def figure_swim_hydro_speed(num=23,
                             bandwith=0.25,
                             seg_tracks=seg_tracks,
+                            iqr=False,
+                            loess=False,
                             weights=None,
                             label=""):
     plt.figure(num).clf()
@@ -190,14 +192,37 @@ def figure_swim_hydro_speed(num=23,
         order=np.argsort(hydro_speed)
         N=201
 
-        if weights is not None:
-            hyd_med=track_common.medfilt_weighted( hydro_speed[order], N,weights=weights)
-            dep_med=track_common.medfilt_weighted( dep[order], N, weights=weights)
+        if loess:
+            from skmisc import loess
+            l=loess.loess(x=hydro_speed,y=dep,weights=weights,
+                          span=0.25,degree=1)
+            l.fit()
+            hyd_med=hydro_speed[order]
+            pred=l.predict(hyd_med,stderror=True).confidence()
+            dep_med=pred.fit
+            ax.plot( hyd_med, dep_med, 'k-',zorder=1)
+            ax.fill_between( hyd_med, pred.lower, pred.upper,
+                             color='0.7',zorder=-1.5)
         else:
-            hyd_med=medfilt( hydro_speed[order], N)
-            dep_med=medfilt( dep[order], N)
+            # Simplify things
+            if weights is None:
+                weights=np.ones_like(order)
+
+            if weights is not None:
+                hyd_med=track_common.medfilt_weighted( hydro_speed[order], N,weights=weights[order])
+                dep_med=track_common.medfilt_weighted( dep[order], N, weights=weights[order])
+            else:
+                hyd_med=medfilt( hydro_speed[order], N)
+                dep_med=medfilt( dep[order], N)
             
-        ax.plot( hyd_med[N:-N], dep_med[N:-N], 'k-',zorder=1)
+            ax.plot( hyd_med[N:-N], dep_med[N:-N], 'k-',zorder=1)
+
+            if iqr:
+                dep_25=track_common.medfilt_weighted( dep[order], N, weights=weights[order], quantile=0.25)
+                dep_75=track_common.medfilt_weighted( dep[order], N, weights=weights[order], quantile=0.75)
+                ax.fill_between( hyd_med[N:-N],
+                                 dep_25[N:-N], dep_75[N:-N],
+                                 color='0.7',zorder=-1.5)
             
         ax.set_xlabel('Water speed (m/s)')
         ax.axis(xmin=0,xmax=0.8)
@@ -229,9 +254,15 @@ def figure_swim_hydro_speed(num=23,
     fig.subplots_adjust(left=0.095,right=0.90,top=0.88,bottom=0.18)
     return fig
 
-fig=figure_swim_hydro_speed()
-# all_segments-swim_hydro_speed.png was when it had 4 panels.
-fig.savefig(os.path.join(fig_dir,"all_segments-swim_hydro_speed-3panels.png"),dpi=200)
+# fig=figure_swim_hydro_speed(iqr=False)
+# # all_segments-swim_hydro_speed.png was when it had 4 panels.
+# fig.savefig(os.path.join(fig_dir,"all_segments-swim_hydro_speed-3panels.png"),dpi=200)
+# 
+# fig=figure_swim_hydro_speed(iqr=True)
+# fig.savefig(os.path.join(fig_dir,"all_segments-swim_hydro_speed-3panels-iqr.png"),dpi=200)
+
+fig=figure_swim_hydro_speed(loess=True)
+fig.savefig(os.path.join(fig_dir,"all_segments-swim_hydro_speed-3panels-loess.png"),dpi=200)
 
 ##
 
@@ -661,6 +692,14 @@ for suffix in suffixes[::-1]:
     Z=Zsym[N-1:].copy()
     Z[:] += Zsym[N-1::-1]
     ax.plot(bins,Z,label=nice_names[suffix])
+    
+    # bins[np.argmax(Z)]
+    def cost(x):
+        return float( -(kde(x[0]) + kde(-x[0])) )
+    from scipy.optimize import fmin
+    mode=fmin(cost,[0.2],disp=False)
+    print("Mode: precise=%.4f  estimate=%.4f"%( mode, bins[np.argmax(Z)]))
+
 
 ax.legend(frameon=False)
 ax.axis(xmin=0,xmax=umax,ymin=0)

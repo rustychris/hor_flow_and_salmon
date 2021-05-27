@@ -9,49 +9,93 @@ out to a csv.
 """
 import datetime
 import os
+from stompy import utils
+utils.path("../tags")
+
 import numpy as np
 import xarray as xr
 import re
-from stompy import utils
 import matplotlib.pyplot as plt
 import prepare_pings
 import parse_tek as pt
 import pandas as pd
 import six
 ##
-utils.path("../circulation")
 
+six.moves.reload_module(pt)
 six.moves.reload_module(prepare_pings)
 
-# ping_matcher_2018 may need some manual tweaks to deal with
-# receivers that are too far out of sync.
-pm=prepare_pings.ping_matcher_2018(split_on_clock_change=True)
-pm.allow_dual_bad_pings=True
+year=2020
 
+if year==2018:
+    # ping_matcher_2018 may need some manual tweaks to deal with
+    # receivers that are too far out of sync.
+    pm=prepare_pings.ping_matcher_2018(split_on_clock_change=True)
+    pm.allow_dual_bad_pings=True
+    # full range that seems to have a chance of resolving tracks
+    # Should include the overall start and end times, too.
+    breaks=[np.datetime64("2018-03-13 19:00:00"),
+            np.datetime64('2018-03-16 01:52:47'), # Break for SM1.1 / SM1.2
+            np.datetime64('2018-03-21 00:03:38'), # Break for SM3.1 / SM3.2
+            # That made too long of a period -- sync model never finishes
+            np.datetime64('2018-03-24 00:00:00'), # attempt more sync periods
+            np.datetime64('2018-03-26 00:00:00'),
+            np.datetime64('2018-04-01 00:00:00'),
+            np.datetime64('2018-04-06 00:00:00'),
+            np.datetime64('2018-04-10 00:00:00'),
+            np.datetime64("2018-04-15 01:00:00")]
+    # these are short but not empty. explicitly ignore.
+    name_blacklist=['SM1.0','SM4.1', 'SM3.0', 'SM4.1']
+elif year==2020:
+    pm=prepare_pings.ping_matcher_2020(split_on_clock_change=True)
+    pm.allow_dual_bad_pings=True
+    # full range that seems to have a chance of resolving tracks
+    # This almost certainly too early and too late.
+    breaks=[np.datetime64('2020-03-01T00:00:00'),
+            # Make a nice manageable chunk in the middle for testing
+            np.datetime64('2020-03-17T00:00:00'),
+            np.datetime64('2020-03-17T06:00:00'),
+            # and generous end point
+            np.datetime64('2020-05-20T00:00:00')]
+
+    # SM3 has no valid data - prepare_pings comments very few
+    # detections, no dbg file.
+    min_duration=np.timedelta64(1,'h')
+
+    nonshort=[]
+    for df in pm.all_detects:
+        t_min=max(breaks[0],df.time.values.min())
+        t_max=min(breaks[-1],df.time.values.max())
+        if t_max-t_min>min_duration:
+            nonshort.append(df)
+        else:
+            print(f"{df.name.item()} is too short: {(t_max-t_min)/np.timedelta64(1,'h'):.2f}h")
+    print(f"{len(nonshort)} of {len(pm.all_detects)} hydrophone records were long enough")
+    
+    pm.all_detects=nonshort
+    name_blacklist=[]
+## 
 # Looks like it's probably okay
 for d in pm.all_detects:
     print(f"{d.name.item()} {str(d.time.values[0])} -- {str(d.time.values[-1])}")
-    
 
+# Check for unique beacon ids:
+beacon_to_station={}
+for d in pm.all_detects:
+    station=d.station.item()
+    tag=d.beacon_id.item()
+    if tag in beacon_to_station:
+        assert beacon_to_station[tag]==station
+    else:
+        beacon_to_station[tag]=station
+
+##     
 def fmt(d):
     return utils.to_datetime(d).strftime("%Y%m%dT%H%M")
 
-##
-
-# full range that seems to have a chance of resolving tracks
-breaks=[np.datetime64("2018-03-13 19:00:00"),
-        np.datetime64('2018-03-16 01:52:47'), # Break for SM1.1 / SM1.2
-        np.datetime64('2018-03-21 00:03:38'), # Break for SM3.1 / SM3.2
-        # That made too long of a period -- sync model never finishes
-        np.datetime64('2018-03-24 00:00:00'), # attempt more sync periods
-        np.datetime64('2018-03-26 00:00:00'),
-        np.datetime64('2018-04-01 00:00:00'),
-        np.datetime64('2018-04-06 00:00:00'),
-        np.datetime64('2018-04-10 00:00:00'),
-        np.datetime64("2018-04-15 01:00:00")]
-
+#--
 pm_nomp=pm.remove_multipath()
-##
+#-- 
 
 total_detections=sum( [det.dims['index'] for det in pm.all_detects])
 total_nomp_detections=sum( [det.dims['index'] for det in pm_nomp.all_detects])
@@ -61,16 +105,13 @@ print("Total detections (via prepare_pings): ", total_detections)
 print("Total detections after multipath filter (via prepare_pings): ", total_nomp_detections)
 # Total detections after multipath filter (via prepare_pings):  4338914
 
-##
+#-- 
 force=True
-# these are short but not empty. explicitly ignore.
-name_blacklist=['SM1.0','SM4.1', 'SM3.0', 'SM4.1']
-
 count_in=0
 count_out=0
 
 for period in zip(breaks[:-1],breaks[1:]):
-    period_dir=f"yaps/full/{fmt(period[0])}-{fmt(period[1])}"
+    period_dir=f"yaps/full/{year}/{fmt(period[0])}-{fmt(period[1])}"
     print(f"Processing {period_dir}")
     if not os.path.exists(period_dir):
         os.makedirs(period_dir)
@@ -83,7 +124,7 @@ for period in zip(breaks[:-1],breaks[1:]):
         pm_clip=pm_nomp.clip_time(period)
 
     period_detections=sum( [det.dims['index'] for det in pm_clip.all_detects])
-    print(f"{period} detections {period_detections}")
+    print(f"  detections {period_detections}")
     count_in+=period_detections
         
     dfs=[]
@@ -113,9 +154,11 @@ for period in zip(breaks[:-1],breaks[1:]):
     df_all=pd.concat(dfs)
     df_all.to_csv(os.path.join(period_dir,'all_detections.csv'),index=False)
     
-    print(f"{period} all_detections {len(df_all)}")
+    print(f"  all_detections {len(df_all)}")
     count_out+=len(df_all)
 
+    # Make sure sync_tags are unique:
+    # 2020, SM10.0 and SM11.1 both give FF14 as their tag
     hydros=pd.DataFrame(hydro_recs)
     hydros.to_csv(os.path.join(period_dir,'hydros.csv'),index=False)
 
@@ -136,7 +179,6 @@ ax=fig.add_subplot()
 
 stations=list(np.unique( [d.station.item() for d in pm_clip.all_detects] ))
 
-
 for d in pm_clip.all_detects:
     if len(d.time)==0:
         continue
@@ -156,12 +198,5 @@ ax.yaxis.set_ticks(np.arange(len(stations)))
 ax.yaxis.set_ticklabels(stations)
 ax.xaxis_date()
 
-# Can ignore a lot of those.
-# Just need
-# SM9.0, SM8.0, SM4.0, SM3.1, SM1.1, AM9.0
-# AM8.8, AM5.0, AM4.0 AM3.3, AM2.0 AM1.0
 
-# Middle of the period: SM1.2   break is at numpy.datetime64('2018-03-16T01:52:47')
-#                       SM3.2   break is at numpy.datetime64('2018-03-21T00:03:38')
 
-# Ignore SM4.1, SM3.0, SM1.0, SM4.1

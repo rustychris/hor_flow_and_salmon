@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr 
 
-import os
+import os, glob
 from stompy import memoize
 from stompy.io.local import cdec
 from scipy import signal 
@@ -50,6 +50,29 @@ def fetch_and_parse(local_file,url,**kwargs):
 tag_releases=np.array([np.datetime64("2018-03-02 00:00"),
                        np.datetime64("2018-03-15 00:00")] )
               
+##
+
+# Out of curiosity, how do arrivals compare between the
+# releases?
+tag_ids=df_start.index.values
+tagged_fish=pd.read_excel('../../../field/circulation/2018_Data/2018FriantTaggingCombined.xlsx')
+real_fish_tags=tagged_fish.TagID_Hex
+upper=tagged_fish['Release Date'] < np.datetime64("2018-03-04")
+lower=~upper # some NaT, mostly 2018-03-15
+tagged_fish['release']=np.where(upper,"upper","lower")
+## 
+# Add release column to df_start, then
+# split df_start into df_upper and df_lower
+df_with_release=df_start.merge( tagged_fish[ ['TagID_Hex','release']], left_index=True,
+                                right_on='TagID_Hex')
+
+# 103 of the tracks were from the lower release.
+# 30 tracks from the upper release.
+print( df_with_release.groupby('release').size() )
+
+df_upper=df_with_release[ df_with_release['release']=='upper']
+df_lower=df_with_release[ df_with_release['release']=='lower']
+
 ##
 
 times=utils.unix_to_dt64(df_start.t_mid.values)
@@ -101,17 +124,30 @@ t=np.linspace(df_start.t_mid.min(),df_start.t_mid.max(),400)
 
 t_sort=np.sort(times)
 for i,rel_date in enumerate(tag_releases):
-    if i==0: lbl='Tag Release'
-    else: lbl='__nolabel__'
-    ax_tag.axvline(rel_date,label=lbl)
+    lbl='__nolabel__'
+    if i==0:
+        name=' Upper Tag\n Release'
+    else:
+        name=' Lower Tag\n Release'
+    l=ax_tag.axvline(rel_date,label=lbl,ymax=0.65)
+    ax_tag.text(rel_date,0.65,name,fontstyle='italic',va='top',
+                fontsize=9,
+                transform=ax_tag.get_xaxis_transform())
+    
 ax_tag.plot(np.r_[t_min,t_sort],np.arange(len(times)+1),'k-',
             label='Tag Arrivals')
+
+if 0: # exploring timing of the two releases arriving.
+    for df,label in zip([df_upper,df_lower],['Upper','Lower']):
+        times=utils.unix_to_dt64(df.t_mid.values)
+        t_sort=np.sort(times)
+        ax_tag.plot(np.r_[t_min,t_sort],np.arange(len(times)+1),'k--',
+                    label=f'{label} Tag Arrivals')
     
 ax_tag.set_ylabel('Tag count')
 
 ax_Q.plot(msd_flow.time,msd_flow.flow_m3s,
           label='MSD Flow')
-
 ax_Q.plot(sjd_flow.time,sjd_flow.flow_m3s,
           label='SJD Flow')
 ax_Q.plot(hor_flow.time,hor_flow.flow_m3s,
@@ -132,11 +168,11 @@ turb_col='orange'
 temp_col=ax_temp.lines[0].get_color()
 
 ax_turb.plot(msd_turb.time,msd_turb.turb_lp,label='Turbidity',color=turb_col)
-ax_turb.set_ylabel('NTU',color=turb_col)
-ax_temp.set_ylabel(r'$^{\circ}$C',color=temp_col)
+ax_turb.set_ylabel('NTU') # ,color=turb_col)
+ax_temp.set_ylabel(r'$^{\circ}$C')# ,color=temp_col)
 
-plt.setp(ax_turb.get_yticklabels(),color=turb_col)
-plt.setp(ax_temp.get_yticklabels(), color=temp_col)
+#plt.setp(ax_turb.get_yticklabels(),color=turb_col)
+#plt.setp(ax_temp.get_yticklabels(), color=temp_col)
 
 fig.autofmt_xdate()
 fig.subplots_adjust(left=0.13,top=0.98,bottom=0.17,right=0.70)
@@ -149,6 +185,12 @@ ax_Q.legend(loc='upper left',bbox_to_anchor=[1.13,1],frameon=0)
 ax_temp.legend(handles=ax_temp.lines+ax_turb.lines,loc='upper left',bbox_to_anchor=[1.13,1],
                frameon=0)
 
+# Panel labels:
+for ax,letter in [(ax_tag,'(a)'),
+                  (ax_Q,'(b)'),
+                  (ax_temp,'(c)')]:
+    ax.text(0.015,0.95,letter,va='top',transform=ax.transAxes)
+
 ##
-fig.savefig('fig-timeline.png',dpi=200)
+fig.savefig('fig-timeline.png',dpi=300)
 

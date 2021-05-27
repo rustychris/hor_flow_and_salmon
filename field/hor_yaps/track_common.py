@@ -243,14 +243,14 @@ def set_direction_labels(ax):
     ax.text( 0.0, 0.5, 'River\nLeft',va='center',ha='left',**common)
     ax.text( 1.0, 0.5, 'River\nRight',  va='center',ha='right',**common)
 
-def medfilt_weighted(data,N,weights=None):
+def medfilt_weighted(data,N,weights=None,quantile=0.5):
     """
     Running median filter with weights for each data point
     data: np.ndarray shape [M]
     N: length of the window (weights are not accounted for in the window size)
     weights: np.ndarray shape [M]
+    quantile: compute alternate percentile (0.5: median)
     """
-    quantile=0.5
     if weights is None:
         weights=np.ones(len(data))
 
