@@ -25,26 +25,29 @@ def add_roughness(g):
 
     cell_mean=np.zeros(g.Ncells(),np.float64)
     cell_rms=np.zeros(g.Ncells(),np.float64)
-    X,Y=dem.XY()
 
     cell_list=np.arange(g.Ncells()) # eventually may have to process in tiles
 
     for c in utils.progress(cell_list):
         cell_poly=g_ft.cell_polygon(c)
+        xyxy=cell_poly.bounds
+        xxyy=[xyxy[0],xyxy[2],xyxy[1],xyxy[3]]
+        dcrop=dem.crop(xxyy)
         try:
-            sel=dem.polygon_mask(cell_poly)
+            sel=dcrop.polygon_mask(cell_poly)
         except AttributeError:
             print("!")
             continue
-        sel=sel&np.isfinite(dem.F)
+        sel=sel&np.isfinite(dcrop.F)
         if sel.sum()<10: # ad hoc
             continue
 
-        dem_vals=dem.F[sel]
+        dem_vals=dcrop.F[sel]
+        X,Y=dcrop.XY()
         dem_x=X[sel]
         dem_y=Y[sel]
-        dem_x_loc =dem_x - dem_x.mean()
-        dem_y_loc =dem_y - dem_y.mean()
+        dem_x_loc=dem_x - dem_x.mean()
+        dem_y_loc=dem_y - dem_y.mean()
 
         fit_y = dem_vals
         fit_X = np.c_[dem_x_loc, dem_y_loc, np.ones_like(dem_x)]

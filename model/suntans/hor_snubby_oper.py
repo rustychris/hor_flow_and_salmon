@@ -3,6 +3,7 @@ Driver script for Suntans Head of Old River runs.
 
 This version uses the snubby grid, and includes logic for running
 variable flows
+ 2020-10-08: option to use larger grid
 """
 import six
 import logging
@@ -37,17 +38,20 @@ with open(os.path.join(here,'local_config.py')) as fp:
 
 ##
 os.path.exists(cache_dir) or os.makedirs(cache_dir)
-
+from stompy.model import slurm_mixin
+class SuntansModel(drv.SuntansModel,slurm_mixin.SlurmMixin):
+    sun_bin_dir=os.path.join(os.environ['HOME'],"src/suntans/main")
 
 def base_model(run_dir,run_start,run_stop,
                restart_from=None,
+               grid_option=None,
                steady=False):
     if restart_from is None:
-        model=drv.SuntansModel()
+        model=SuntansModel()
         model.load_template(os.path.join(here,"sun-template.dat"))
         model.num_procs=num_procs
     else:
-        old_model=drv.SuntansModel.load(restart_from)
+        old_model=SuntansModel.load(restart_from)
         model=old_model.create_restart()
 
     model.manual_z_offset=-4
@@ -63,6 +67,8 @@ def base_model(run_dir,run_start,run_stop,
         model.run_start=run_start
     
     model.run_stop=run_stop
+
+    model.config['grid_option']=grid_option or 'snubby'
 
     if restart_from is None:
         ramp_hours=1 # how quickly to increase the outflow
@@ -100,15 +106,20 @@ def base_model(run_dir,run_start,run_stop,
         model.config['maxFaces']=4
         model.config['mergeArrays']=1 # hopefully easier to use than split up.
 
-        # 2019-07-11: refine near-shore swaths of grid, snubby-01 => snubby-04
-        # 2019-07-12: further refinements 04 => 06
-        #grid_src="../grid/snubby_junction/snubby-06.nc"
-        #grid_src="../grid/snubby_junction/snubby-07-edit45.nc"
-        #grid_src="../grid/snubby_junction/snubby-08-edit06.nc" 
-        #grid_src="../grid/snubby_junction/snubby-08-edit24.nc"
-        #grid_src="../grid/snubby_junction/snubby-08-edit50.nc" # good
-        grid_src="../grid/snubby_junction/snubby-08-edit60.nc" # higher res in hole
-        #grid_src="../grid/snubby_junction/snubby-08-refine-edit03.nc" # double res of edit60
+        if model.config['grid_option']=='snubby':
+            # 2019-07-11: refine near-shore swaths of grid, snubby-01 => snubby-04
+            # 2019-07-12: further refinements 04 => 06
+            #grid_src="../grid/snubby_junction/snubby-06.nc"
+            #grid_src="../grid/snubby_junction/snubby-07-edit45.nc"
+            #grid_src="../grid/snubby_junction/snubby-08-edit06.nc" 
+            #grid_src="../grid/snubby_junction/snubby-08-edit24.nc"
+            #grid_src="../grid/snubby_junction/snubby-08-edit50.nc" # good
+            grid_src="../grid/snubby_junction/snubby-08-edit60.nc" # higher res in hole
+            #grid_src="../grid/snubby_junction/snubby-08-refine-edit03.nc" # double res of edit60
+        elif model.config['grid_option']=='large':
+            grid_src="../grid/merge_v16/merge_v16_edit09.nc"
+        else:
+            raise Exception("Unknown grid option %s"%grid_option)
 
         # bathy_suffix=''
         # post_suffix='med0' # on-grid bathy postprocessesing:
@@ -155,8 +166,11 @@ def base_model(run_dir,run_start,run_stop,
     # isn't this just duplicating the setting from above?
     model.z_offset=0.0 # moving away from the semi-automated datum shift to manual shift
 
-    model.add_gazetteer(os.path.join(here,"../grid/snubby_junction/forcing-snubby-01.shp"))
-
+    if model.config['grid_option']=='snubby':
+        model.add_gazetteer(os.path.join(here,"../grid/snubby_junction/forcing-snubby-01.shp"))
+    elif model.config['grid_option']=='large':
+        model.add_gazetteer(os.path.join(here,"../grid/merge_v16/forcing-merge_16-01.shp"))
+        
     def fill(da):
         return utils.fill_tidal_data(da,fill_time=False)
 
@@ -258,8 +272,9 @@ if __name__=='__main__':
                         action='store_true')
     parser.add_argument("-i","--interval",help="Interval for multiple shorter runs, e.g. 1D for 1 day",
                         default=None)
+    parser.add_argument("-l","--large",help="Select larger domain",action='store_true')
     
-    # args="-d runs/short036 -s 2018-04-05T12:00 -e 2018-04-05T16:00 ".split()
+    # args="-l -d runs/largetest00 -s 2018-04-05T12:00 -e 2018-04-05T16:00 ".split()
     args=None
     args=parser.parse_args(args=args)
     
@@ -294,7 +309,7 @@ if __name__=='__main__':
         run_interval=np.timedelta64(int(args.interval[:-1]),args.interval[-1])
     else:
         # in one go.
-        run_interval=multi_run_stop-run_start
+        run_interval=None
 
     assert args.dir is not None
         
@@ -303,11 +318,16 @@ if __name__=='__main__':
     while True:
         if last_run_dir is not None:
             last_run=drv.SuntansModel.load(last_run_dir)
+            # Have to be careful that run is long enough to output new
+            # restart time step, otherwise we'll get stuck.
             run_start=last_run.restartable_time()
         if run_start>=multi_run_stop:
             break
-        
-        run_stop=min(run_start+run_interval,multi_run_stop)
+
+        if run_interval is not None:
+            run_stop=min(run_start+run_interval,multi_run_stop)
+        else:
+            run_stop=multi_run_stop
         print("Simulation period: %s -- %s"%(run_start,run_stop))
         date_str=utils.to_datetime(run_start).strftime('%Y%m%d')
         # cfg000: first go
@@ -323,8 +343,12 @@ if __name__=='__main__':
         run_dir=f"{args.dir}_{date_str}"
 
         if not drv.SuntansModel.run_completed(run_dir):
+            grid_option='snubby'
+            if args.large:
+                grid_option='large'
             model=base_model(run_dir,run_start,run_stop,
                              restart_from=last_run_dir,
+                             grid_option=grid_option,
                              steady=args.steady)
             model.sun_verbose_flag="-v"
             try:
@@ -343,6 +367,9 @@ if __name__=='__main__':
                 model.run_simulation()
         run_count+=1
         last_run_dir=run_dir
+        if run_interval is None:
+            print("Single shot run. Breaking out")
+            break
 
 
 
