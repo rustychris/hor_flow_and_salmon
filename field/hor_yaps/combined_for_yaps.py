@@ -16,10 +16,14 @@ import numpy as np
 import xarray as xr
 import re
 import matplotlib.pyplot as plt
+
 import prepare_pings
 import parse_tek as pt
 import pandas as pd
 import six
+
+import seawater
+
 ##
 
 six.moves.reload_module(pt)
@@ -45,7 +49,7 @@ if year==2018:
             np.datetime64('2018-04-10 00:00:00'),
             np.datetime64("2018-04-15 01:00:00")]
     # these are short but not empty. explicitly ignore.
-    name_blacklist=['SM1.0','SM4.1', 'SM3.0', 'SM4.1']
+    name_exclude=['SM1.0','SM4.1', 'SM3.0', 'SM4.1']
 elif year==2020:
     pm=prepare_pings.ping_matcher_2020(split_on_clock_change=True)
     pm.allow_dual_bad_pings=True
@@ -53,8 +57,15 @@ elif year==2020:
     # This almost certainly too early and too late.
     breaks=[np.datetime64('2020-03-01T00:00:00'),
             # Make a nice manageable chunk in the middle for testing
+            # But there were no fish in that chunk
             np.datetime64('2020-03-17T00:00:00'),
             np.datetime64('2020-03-17T06:00:00'),
+            # So make a nice chunk that seems to have some fish:
+            # Note that this slicing cannot at the moment be handled in yaps,
+            # because there are clock resets that create multiple copies of
+            # the same hydrophone, which angers yaps.
+            np.datetime64('2020-04-09 11:00:00'),
+            np.datetime64('2020-04-09 17:00:00'),
             # and generous end point
             np.datetime64('2020-05-20T00:00:00')]
 
@@ -73,7 +84,7 @@ elif year==2020:
     print(f"{len(nonshort)} of {len(pm.all_detects)} hydrophone records were long enough")
     
     pm.all_detects=nonshort
-    name_blacklist=[]
+    name_exclude=[]
 ## 
 # Looks like it's probably okay
 for d in pm.all_detects:
@@ -105,10 +116,13 @@ print("Total detections (via prepare_pings): ", total_detections)
 print("Total detections after multipath filter (via prepare_pings): ", total_nomp_detections)
 # Total detections after multipath filter (via prepare_pings):  4338914
 
-#-- 
+##-- 
 force=True
 count_in=0
 count_out=0
+
+breaks=pm_nomp.infer_breaks(t_start=np.datetime64('2020-03-01T00:00:00'),
+                            t_stop =np.datetime64('2020-05-20T00:00:00'))
 
 for period in zip(breaks[:-1],breaks[1:]):
     period_dir=f"yaps/full/{year}/{fmt(period[0])}-{fmt(period[1])}"
@@ -123,18 +137,16 @@ for period in zip(breaks[:-1],breaks[1:]):
     else:
         pm_clip=pm_nomp.clip_time(period)
 
+    pm_clip.drop_by_name(name_exclude)
+        
     period_detections=sum( [det.dims['index'] for det in pm_clip.all_detects])
     print(f"  detections {period_detections}")
     count_in+=period_detections
         
     dfs=[]
     hydro_recs=[]
-
+    
     for d in pm_clip.all_detects:
-        if d.dims['index']==0: continue # clipped away
-        if d.name.item() in name_blacklist:
-            print(f"{d.name.item()} is in the blacklist -- ignore")
-            continue
         df1=d.to_dataframe()
 
         df2=df1.reset_index().loc[:, ['tag']]
@@ -162,6 +174,31 @@ for period in zip(breaks[:-1],breaks[1:]):
     hydros=pd.DataFrame(hydro_recs)
     hydros.to_csv(os.path.join(period_dir,'hydros.csv'),index=False)
 
+    if 0:
+        fig=pm_clip.plot_chunk_stations()
+        fig.axes[0].set_title(str(period))
+        fig.savefig(os.path.join(period_dir,'chunk_stations.png'),dpi=200)
+
+    if 1: # Write temperature data, too.
+        dfs_temp=[det[ ['temp','epoch'] ].to_dataframe()
+                  for det in pm_clip.all_detects]
+
+        df_temp=pd.concat(dfs_temp).sort_values('epoch')
+        df_temp['temp']=df_temp['temp'].astype(np.float64) # some dataframes have this as object
+
+        # bin average at 15 minutes.
+        bin_size=15*60
+        df_bin_temp=df_temp.groupby(df_temp['epoch']//bin_size).mean()
+
+        # T90 conversion pointless since temp sensor is only down to 0.1degC,
+        # salinity, temperature, pressure
+        df_bin_temp['ss']=seawater.svel(0.0,df_bin_temp['temp'].values,0.0)
+
+        df_bin_temp=df_bin_temp.rename({'epoch':'ts'},axis=1)
+        df_bin_temp[ ['ts','ss'] ].to_csv(os.path.join(period_dir,'soundspeed.csv'),index=False)
+
+    
+
 # Total count unclipped is about 5.2M, but I think that includes times
 # when receivers weren't in the water, or maybe very few were in
 # the water.
@@ -169,34 +206,42 @@ print(f"Clipping {count_in} total in, {count_out} total out")
 # Clipping 2765802 total in, 2765610 total out
 
 ##
-import matplotlib.pyplot as plt 
-from matplotlib import patches
 
-# Plot the time ranges for each station
-fig=plt.figure(1)
-fig.clf()
-ax=fig.add_subplot()
+# Chunks:
+#   Three options
+#  (1) Adjust tags to reflect which receivers were active.
+#      i.e. if FF14 got moved midway through, create a fake
+#      tag FF140 for the second period, and change all rx 
+#      of FF14 after the change to be FF140.
 
-stations=list(np.unique( [d.station.item() for d in pm_clip.all_detects] ))
+#  (2) Split on every time there was a possible move in the
+#      hydrophone.
+#      Downside is that location solutions for other hydrophones
+#      will be on shorter datasets, so probably more noise.
+#      This is probably the best first step, though.
 
-for d in pm_clip.all_detects:
-    if len(d.time)==0:
-        continue
-    station_i=stations.index(d.station.item())
-    rect=patches.Rectangle( xy=[d.time.values[0],station_i-0.2],
-                            width=d.time.values[-1]-d.time.values[0],
-                            height=0.4,edgecolor='k',facecolor='0.6')
-    ax.add_patch(rect)
-
-    ax.text(d.time.values[0],station_i-0.15,d.name.item())
-
-ax.axis(xmin=period[0],
-        xmax=period[1],
-        ymin=-0.5,ymax=12.5)
-
-ax.yaxis.set_ticks(np.arange(len(stations)))
-ax.yaxis.set_ticklabels(stations)
-ax.xaxis_date()
+#  (3) Assume hydrophones didn't move too much and didn't change
+#      clock too much, and just merge.
+## 
 
 
+# How many stations, and for how much of the overall period,
+# do we have temperature?
+
+
+plt.figure(10).clf()
+
+for det in pm_nomp.all_detects:
+    sel=np.isfinite(det.temp.values)
+    t=utils.unix_to_dt64(det.epoch.values)
+    plt.plot( t[sel], det.temp.values[sel])
+
+# temp seems good!
+# O(1 degC) variation across hydrophones at a single time.
+
+# So how does yaps want SS estimates?
+# ss_data is a table with ts timestamp and ss sound speed in m/s
+# So I have to average over the receivers and write out to csv.
+
+##
 

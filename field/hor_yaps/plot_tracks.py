@@ -49,7 +49,7 @@ for d in [fig_dir_gen,fig_dir]:
                 
 ##     PLOTS    ##
 
-hydros=pd.read_csv('yap-positions.csv')
+hydros=pd.read_csv('yap-positions-2018.csv')
 
 ## 
 dem=field.GdalGrid("../../bathy/junction-composite-20200604-w_smooth.tif")
@@ -401,16 +401,17 @@ plots=fig_track_swimming(df.loc['7A96','track'],
                          # swim_filt=lambda x: filters.lowpass_fir(x,winsize=13))
                          )
 
-## 
-tag_fig_dir=os.path.join(fig_dir,'tags')
-if not os.path.exists(tag_fig_dir):
-    os.makedirs(tag_fig_dir)
-    
-for tag in df.index.values:
-    print(tag)
-    plots=fig_track_swimming(df.loc[tag,'track'],num=21,
-                             buttons=False)
-    plots['fig'].savefig(os.path.join(tag_fig_dir,'%s-swimming.png'%plots['tag']))
+##
+if 0: # Slow -- plots each tag
+    tag_fig_dir=os.path.join(fig_dir,'tags')
+    if not os.path.exists(tag_fig_dir):
+        os.makedirs(tag_fig_dir)
+
+    for tag in df.index.values:
+        print(tag)
+        plots=fig_track_swimming(df.loc[tag,'track'],num=21,
+                                 buttons=False)
+        plots['fig'].savefig(os.path.join(tag_fig_dir,'%s-swimming.png'%plots['tag']))
 
 ##
 
