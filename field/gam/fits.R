@@ -4,6 +4,8 @@ library(ggplot2)
 library(GGally)
 library(visreg)
 library(dplyr)
+library(gridExtra)
+library(itsadug)
 
 # raw data as output by track_analyses.py
 seg_data <- read.csv('../hor_yaps/segment_correlates.csv')
@@ -13,8 +15,10 @@ seg_data$waterdepth <- seg_data$model_z_eta - seg_data$model_z_bed
 seg_data$vor <- abs(seg_data$model_vor_top2m)
 
 cols <- c("tag","swim_urel","swim_lat","hydro_speed","turb","hour","flow_100m3s",
-          "vor","waterdepth")
-mod_data <- seg_data[cols]
+          "vor","waterdepth","tnum")
+
+mod_data <- start_event(seg_data[cols],"tnum",event="tag")
+
 
 # GAM for instantaneous rheotaxis
 # Most of the correlates do not have meaningful variation within a 
@@ -24,77 +28,94 @@ mod_data <- seg_data[cols]
 # [mgcv with random effects following notes at
 #  https://fromthebottomoftheheap.net/2021/02/02/random-effects-in-gams/ ]
 
-# # Initial model with all potential terms included
-# mod_segs <- gam(swim_urel ~ s(hydro_speed,bs="cr") 
-#                 + s(vor,bs="cr")
-#                 + s(waterdepth,bs="cr")
-#                 + s(tag,bs='re'), 
-#                 data=mod_data)
-# summary(mod_segs)
-# visreg(mod_segs)
+# Initial model with all potential terms included
+mod_segs <- gam(swim_urel ~ s(hydro_speed,bs="cr") 
+                 + s(swim_lat,bs="cr")
+                 + s(vor,bs="cr")
+                 + s(waterdepth,bs="cr")
+                 + s(tag,bs='re'), 
+                 data=mod_data)
+#summary(mod_segs)
+#visreg(mod_segs)
 # concurvity(mod_segs,full=FALSE)
 # concurvity(mod_segs,full=TRUE)
 # BIC(mod_segs) # -5128
 
-# There is still some conflation between hydro_speed and the tag random
-# effect. Would this be more robust if I used the hydro speed anomaly
-# instead? Anomaly would either be hydro_speed relative to river velocity,
-# or hydro_speed relative to track-averaged hydro speed.
-# There is concurvity between vorticity, waterdepth, and hydro_speed.
-# Using the observed concurvity estimates, full=FALSE:
-#   hydro_speed: 0.05 on vor, 0.30 on waterdepth
-#   vor: 0.04 on hydro_speed, 0.06 on waterdepth
-#   waterdepth: 0.35 on hydro_speed, 0.21 on vorticity.
-# When considering the full concurvity:
-#   hydro_speed: 0.90 explained by other terms
-#   vor: 0.55 explained by other terms
-#   waterdepth: 0.61 explained by other terms.
+# Following tips here:
+# https://cran.r-project.org/web/packages/itsadug/vignettes/acf.html
+# These are in fact all identical
+acf(resid(mod_segs), main="acf(resid(mod_segs))")
+#acf(resid_gam(mod_segs), main="acf(resid_gam(mod_segs))")
+#acf_resid(mod_segs, main="acf_resid(mod_segs)")
+r1 <- start_value_rho(mod_segs, plot=TRUE)
 
-#mod_segs_vor <- gam(swim_urel ~ + s(vor,bs="cr") + s(tag,bs='re'), 
-#                data=mod_data)
-#BIC(mod_segs_vor) # -4844. Not as good as mod_segs
+# Seems I have to use bam in order for the AR options 
+# to take effect. There are still some outliers in swim_lat that 
+# are potentially forcing it to be more important than it really is.
+# Brute-force removal of these outliers did not substantially change
+# p-values. 
+# Limiting knots to 3 also did not reduce significance, but made
+# the fits smoother.
+mod_segs_ar <- bam(swim_urel ~ s(hydro_speed,bs="cr") 
+                + s(swim_lat,bs="cr")
+                + s(vor,bs="cr")
+                + s(waterdepth,bs="cr")
+                + s(tag,bs='re'), 
+                rho=r1, AR.start=mod_data$start.event,
+                data=mod_data,
+                gamma=10)
+summary(mod_segs_ar)
+options(repr.plot.width=6,repr.plot.height=5.5)
+p1<-visreg(mod_segs_ar,"swim_lat",fill=list(fill="green"), points=list(alpha=0.4),gg=TRUE)
+p2<-visreg(mod_segs_ar,"hydro_speed",fill=list(fill="green"),points=list(alpha=0.4),gg=TRUE)
+p3<-visreg(mod_segs_ar,"waterdepth",fill=list(fill="green"),points=list(alpha=0.4),gg=TRUE)
+p4<-visreg(mod_segs_ar,"tag",gg=TRUE)
+pan<-grid.arrange(p1,p2,p3,p4,nrow=2)
+ggsave('mod_segs_lon.png',plot=pan,width=6,height=5.5)
 
-#mod_segs_depth <- gam(swim_urel ~ + s(waterdepth,bs="cr") + s(tag,bs='re'), 
-#                      data=mod_data)
-#BIC(mod_segs_depth) # -4973
+# summary reports that everything but vorticity is
+# significant. Visual plots suggest that swim_lat is
+# not significant, though.
 
-mod_segs_hydro <- gam(swim_urel ~ + s(hydro_speed,bs="cr") + s(tag,bs='re'), 
-                      data=mod_data)
-summary(mod_segs_hydro)
-visreg(mod_segs_hydro,'hydro_speed',gg=TRUE) + coord_cartesian(ylim = c(-0.75, 0.75))
-visreg(mod_segs_hydro,'tag',gg=TRUE) + coord_cartesian(ylim = c(-0.75, 0.75))
-BIC(mod_segs_hydro) # -5054
 
-# Of the segment-based models, mod_segs_hydro is the strongest (by BIC)
-# of the single parameter models.
-# note that hydro_speed is still concurved with tag.  So tag may be absorbing
-# a fair bit of variance related to river flow.
+# Within-track Lateral swimming
+mod_seglat <- gam(swim_lat ~ s(hydro_speed,bs="cr") 
+                + s(swim_urel,bs="cr")
+                + s(vor,bs="cr")
+                + s(waterdepth,bs="cr")
+                + s(tag,bs='re'), 
+                data=mod_data)
+acf(resid(mod_seglat), main="acf(resid(mod_seglat))")
+r1_lat <- start_value_rho(mod_seglat, plot=TRUE)
 
-# I do think it would be instructive to remove the per-track hydro_speed mean
-# and fit again. Would expect to get a similar GCV and R-sq, but also a much
-# lower concurvity. Mostly just to test my understanding of the model
+mod_seglat_ar <- bam(swim_lat ~ s(hydro_speed,bs="cr") 
+                   + s(swim_urel,bs="cr")
+                   + s(vor,bs="cr")
+                   + s(waterdepth,bs="cr")
+                   + s(tag,bs='re'), 
+                   rho=r1_lat, AR.start=mod_data$start.event,
+                   family=Gamma,
+                   data=mod_data)
+summary(mod_seglat_ar)
+visreg(mod_seglat_ar,scale="response") # ,partial=TRUE)
 
-# hydro_by_tag <- mod_data %>% group_by(tag) %>% summarize(mean_hydro = mean(hydro_speed))
-# modh_data <- mod_data %>% inner_join(hydro_by_tag)
-# modh_data$hydro_anom <- modh_data$hydro_speed - modh_data$mean_hydro
-# 
-# mod_segs_hydroa <- gam(swim_urel ~ + s(hydro_anom,bs="cr") + s(tag,bs='re'), 
-#                        data=modh_data)
+# # Sub-sampling to understand effects of autocorrelation
+# # When sub-sampling, the fits are twitchy, even when 
+# # forcing a simpler model with gamma.
+# for ( it in 1:10 ) {
+#   mod_data_sub <- sample_n(mod_data,as.integer(nrow(mod_data)/2)) 
+#   mod_sub_segs <- gam(swim_urel ~ s(hydro_speed,bs="cr") 
+#                   + s(swim_lat,bs="cr")
+#                   + s(vor,bs="cr")
+#                   + s(waterdepth,bs="cr")
+#                   + s(tag,bs='re'), 
+#                   data=mod_data_sub,gamma=15)
+#   #summary(mod_sub_segs)
+#   # Just the p-values for the smooth terms.
+#   print(summary(mod_sub_segs)$s.table[,4])
+# }
+# Regardless of gamma, seems the p-values are not stable.
 
-# summary(mod_segs_hydroa)
-# visreg(mod_segs_hydroa)
-
-# With the per-tag hydro mean removed, observed concurvity becomes 0.127 for hydro_anom
-# and 0.015 for tag.
-# GCV for the model 0.023378, Devience explained 35.9%, R-sq=0.347.
-# These are slightly "better" than mod_segs_hydro, not entirely clear why
-# there is a difference. BIC also slightly better.
-# concurvity(mod_segs_hydroa)
-# BIC(mod_segs_hydroa) # -5089
-
-# Lateral swimming with all potential terms included
-# vorticity and hydro speed don't look convincing.
-# drop them, and BIC gets more negative. good.
 
 # With no weighting, n=6457
 # and all terms are highly significant.
@@ -104,30 +125,6 @@ BIC(mod_segs_hydro) # -5054
 # to 2 and 4. Unfortunately this also decreases the strength
 # of the random effects term, decreasing its edf from 105 to 20.
 # weights<-rep(0.01,nrow(mod_data))
-
-# Two particular models are of interest for lateral swimming
-# This one forgoes a random effect in order to include time of
-# day. It bears out the same diurnal signal already discussed
-# in the paper.
-mod_seglat <- gam(swim_lat ~ s(waterdepth,bs="cr")
-                + s(swim_urel,bs="cr")
-                + s(hour,bs='cc'),
-                knots=list(hour=c(0,24)),
-                data=mod_data)
-summary(mod_seglat)
-visreg(mod_seglat)
-
-mod_seglatre <- gam(swim_lat ~ s(waterdepth,bs="cr") +
-                   s(swim_urel,bs="cr") +
-                   s(tag,bs='re'),
-                  data=mod_data)
-summary(mod_seglatre)
-visreg(mod_seglatre)
-
-# https://stats.stackexchange.com/questions/289230/selecting-gam-model-link-function-and-autocorrelation-mgcv
-# Maybe a better approach for the autocorrelation?
-# Unfortunately this fails with an error re non-positive definite,
-# maybe suggesting that some tag does not have enough samples?
 
 ## 
 
