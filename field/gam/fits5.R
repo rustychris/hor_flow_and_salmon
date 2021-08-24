@@ -71,7 +71,7 @@ mod_segs <- bam(swim_urel ~ s(hydro_speed,bs="cs")
                  weights=mod_data$weight,
                  gamma=1)
 # summary(mod_segs)
-visreg(mod_segs) 
+#visreg(mod_segs) 
 # inclusion of weights increased p-value for vor and waterdepth,
 # but they are still "significant" at this stage.
 
@@ -117,10 +117,14 @@ mod_segs_ar_sum
 # at gamma=5, waterdepth, and reach_velo_ms also get dropped.
 options(repr.plot.width=6,repr.plot.height=3.0)
 Yl=c(-0.5,0.5)
-Y <- coord_cartesian(ylim=Yl)
+Y <- coord_cartesian(ylim=Yl,expand=FALSE)
 pnt<-list(alpha=0.2,size=0.4)
 
-  # then test for any affect across
+thm<-theme_classic() +
+  theme(text = element_text(size=8),
+        axis.text=element_text(colour='black',size=rel(1.0)))
+
+# then test for any affect across
 # choice of velocity.
 var_names<-names(mod_segs_ar$var.summary)
 panels<-list()
@@ -130,24 +134,37 @@ for ( vi in 1:length(var_names) ) {
   if ( p_val > 0.05 ) { next }
   if ( mod_segs_ar_sum$edf[vi] < 0.5) { next }
   if ( vname=='swim_lat' ) {
-      coords <-coord_cartesian(ylim=Yl,xlim=c(0,0.5))
+      coords <-coord_cartesian(ylim=Yl,xlim=c(0.0,0.5),expand=FALSE)
     } else {
       coords<-Y 
     }
-  panel<-visreg(mod_segs_ar,vname,fill=list(fill="green"), points=pnt,gg=TRUE,
-                ylab=expression(Long.~velocity~(m~s^{-1}))) + coords 
+  if (vname=='swim_lat') {
+    xlab<-expression(Lat.~speed~(m~s^{-1}))
+  } else if (vname=='hour' ){
+    xlab<-'Hour'
+  } else if (vname=='hydro_speed') {
+    xlab<-expression(Hydro.~speed~(m~s^{-1})) 
+  } else {
+    xlab<-vname
+  }
+  
+  if (length(panels)==0) {
+    ylab<-expression(Partial~residual~(m~s^{-1}))
+  } else {
+    ylab<-''
+  }
+  # Since the bands are probably too narrow, show the points but not
+  # the bands.
+  panel<-visreg(mod_segs_ar,vname,band=FALSE,# fill=list(fill="green"), 
+                line=list(col="black"),
+                points=pnt,gg=TRUE,
+                ylab=ylab,xlab=xlab) + thm + coords
   panels<-append(panels,list(panel))
 }
 
-# Weak attemp to get range of smooth:
-#visreg(mod_segs_ar,"hour",fill=list(fill="green"), points=pnt,gg=TRUE,
-#              ylab=expression(Long.~velocity~(m~s^{-1}))) + 
-#  geom_hline(yintercept=-0.026) +
-#  geom_hline(yintercept=-0.154) + coords
-
-
 nr=ceiling(length(panels)/3)
 pan<-grid.arrange(grobs=panels,nrow=nr)
+
 ggsave(paste('mod5_segs_lon.png',sep=''),plot=pan,width=6,height=0.5+nr*1.5)
 
 ######################### 
@@ -193,7 +210,7 @@ mod_lat_ar_sum
 
 options(repr.plot.width=6,repr.plot.height=5.5)
 Yl=c(-0.1,0.5)
-Y <- coord_cartesian(ylim=Yl)
+Y <- coord_cartesian(ylim=Yl,expand=FALSE)
 
 var_names<-names(mod_lat_ar$var.summary)
 panels<-list()
@@ -208,29 +225,35 @@ for ( vi in 1:length(var_names) ) {
   if ( !signif ) { 
     next 
   }
+  xlab<-vname
   if ( vname=='swim_lat' ) {
-    coords <-coord_cartesian(ylim=Yl,xlim=c(0,0.5))
+    coords <-coord_cartesian(ylim=Yl,xlim=c(0,0.5),expand=FALSE)
   } else if ( vname=='swim_urel' ) {
-    coords <- coord_cartesian(ylim=Yl,xlim=c(-0.5,0.5))
+    coords <- coord_cartesian(ylim=Yl,xlim=c(-0.6,0.6),expand=FALSE)
+    xlab<-expression(Long.~velocity~(m~s^{-1}))
+  } else if (vname=='hour') {
+    xlab<-'Hour'
+    coords <- coord_cartesian(ylim=Yl,xlim=c(0,24),expand=FALSE)
+  } else if (vname=='reach_velo_ms') {
+    xlab<-expression(River~velocity~(m~s^{-1}))
+    coords <- coord_cartesian(ylim=Yl,xlim=c(0.15,0.75))
   } else {
     coords<-Y 
   }
-  panel<-visreg(mod_lat_ar,vname,fill=list(fill="green"), points=pnt,gg=TRUE,
-                ylab=expression(Lateral~speed~(m~s^{-1}))) + coords 
+  
+  if (length(panels)==0){
+    ylab<-expression(Partial~residual~(m~s^{-1}))
+  } else {
+    ylab<-''
+  }
+  
+  panel<-visreg(mod_lat_ar,vname,band=FALSE, points=pnt,gg=TRUE,
+                line=list(col="black"),
+                xlab=xlab,ylab=ylab) + thm + coords 
   panels<-append(panels,list(panel))
 }
 nr<-ceiling(length(panels)/3)
 pan<-grid.arrange(grobs=panels,nrow=nr)
 ggsave(paste('mod5_segs_lat.png',sep=''),plot=pan,width=6,height=0.5+1.5*nr)
 
-visreg(mod_lat_ar)
-# A bit more reading, and I think I need a better distribution. The qq-plot
-# (gam.check(mod_segs_ar)) suggests that the true distribution has heavier tails
-# than a normal. The scat family fixes this (fits4.r), but leads to convergence
-# issues and much larger residuals.
-
-visreg(mod_lat_ar,'swim_urel',fill=list(fill="green"), ,
-       points=pnt,gg=TRUE,band=FALSE) + coord_cartesian(ylim=Yl,xlim=c(-0.5,0.5))
-
-
-
+#visreg(mod_lat_ar)
