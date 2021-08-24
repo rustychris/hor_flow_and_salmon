@@ -2,3 +2,8 @@
 .Rhistory
 model_00.stan.pkl
 gam.Rproj
+*.pkl
+mod2*.png
+mod3*.png
+mod4*.png
+Thumbs.db*

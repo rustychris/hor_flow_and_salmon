@@ -1,6 +1,7 @@
 # follow m-clark.github.io intro, use mgcv
 # fits2 tries to combine the inter- and intra- track
 # fits into a single operation.
+# fits5: combine data from all 3 vertical ranges, fit as a whole.
 library(mgcv)
 library(ggplot2)
 library(GGally)
@@ -15,19 +16,24 @@ library(itsadug)
 # in the swim_urel distribution as expected.
 # longitudinal analysis is twitchy. With davg velocity, turbidity
 # makes it in (!), and with top1m, reach_velo_ms makes it in. 
-vavg<-'davg'
+mod_datas=c()
 
-# raw data as output by track_analyses.py
-seg_data <- read.csv(paste('../hor_yaps/segment_correlates_',vavg,'.csv',sep=''))
-# convert tag id to a factor for use as random effect in mgcv
-seg_data$tag <- factor(seg_data$id)
-seg_data$waterdepth <- seg_data$model_z_eta - seg_data$model_z_bed
-seg_data$vor <- abs(get(paste("model_vor_",vavg,sep=""),seg_data))
+for ( vavg in c('top1m','top2m','davg') ) {
+  # raw data as output by track_analyses.py
+  seg_data <- read.csv(paste('../hor_yaps/segment_correlates_',vavg,'.csv',sep=''))
+  # convert tag id to a factor for use as random effect in mgcv
+  seg_data$tag <- factor(seg_data$id)
+  seg_data$waterdepth <- seg_data$model_z_eta - seg_data$model_z_bed
+  seg_data$vor <- abs(get(paste("model_vor_",vavg,sep=""),seg_data))
+  
+  cols <- c("tag","swim_urel","swim_lat","hydro_speed","turb","hour","flow_100m3s",
+            "vor","reach_velo_ms","waterdepth","tnum")
+  
+  dat <- start_event(seg_data[cols],"tnum",event="tag")
+  mod_datas=append(mod_datas,list(dat))
+}
 
-cols <- c("tag","swim_urel","swim_lat","hydro_speed","turb","hour","flow_100m3s",
-          "vor","reach_velo_ms","waterdepth","tnum")
-
-mod_data <- start_event(seg_data[cols],"tnum",event="tag")
+mod_data<- Reduce(rbind,mod_datas)
 
 # GAM for instantaneous rheotaxis
 # Most of the correlates do not have meaningful variation within a 
@@ -48,7 +54,8 @@ tags <- mod_data %>% count(tag)
 tags$weight <- 1./tags$n
 
 weights=merge( mod_data, tags, by="tag")$weight
-mod_data$weight <- weights/mean(weights)
+# Factor of 1/3 to account for duplicate measurements over vertical ranges. 
+mod_data$weight <- 1/3*weights/mean(weights)
 
 
 # Initial model with all potential terms included
@@ -64,7 +71,7 @@ mod_segs <- bam(swim_urel ~ s(hydro_speed,bs="cs")
                  weights=mod_data$weight,
                  gamma=1)
 # summary(mod_segs)
-# visreg(mod_segs) 
+visreg(mod_segs) 
 # inclusion of weights increased p-value for vor and waterdepth,
 # but they are still "significant" at this stage.
 
@@ -83,7 +90,7 @@ r1 <- start_value_rho(mod_segs, plot=TRUE)
 
 # Have to use bam in order for the AR options 
 # to take effect.
-for ( gamma in 1:20 ) {
+for ( gamma in 1:50 ) {
   mod_segs_ar <- bam(swim_urel ~ s(hydro_speed,bs="cs") 
                   + s(swim_lat,bs="cs")
                   + s(vor,bs="cs")
@@ -113,7 +120,7 @@ Yl=c(-0.5,0.5)
 Y <- coord_cartesian(ylim=Yl)
 pnt<-list(alpha=0.2,size=0.4)
 
-# then test for any affect across
+  # then test for any affect across
 # choice of velocity.
 var_names<-names(mod_segs_ar$var.summary)
 panels<-list()
@@ -127,12 +134,21 @@ for ( vi in 1:length(var_names) ) {
     } else {
       coords<-Y 
     }
-  panel<-visreg(mod_segs_ar,vname,fill=list(fill="green"), points=pnt,gg=TRUE) + coords 
+  panel<-visreg(mod_segs_ar,vname,fill=list(fill="green"), points=pnt,gg=TRUE,
+                ylab=expression(Long.~velocity~(m~s^{-1}))) + coords 
   panels<-append(panels,list(panel))
 }
 
-pan<-grid.arrange(grobs=panels,nrow=2)
-ggsave(paste('mod3_segs_lon',vavg,'.png',sep=''),plot=pan,width=6,height=4.0)
+# Weak attemp to get range of smooth:
+#visreg(mod_segs_ar,"hour",fill=list(fill="green"), points=pnt,gg=TRUE,
+#              ylab=expression(Long.~velocity~(m~s^{-1}))) + 
+#  geom_hline(yintercept=-0.026) +
+#  geom_hline(yintercept=-0.154) + coords
+
+
+nr=ceiling(length(panels)/3)
+pan<-grid.arrange(grobs=panels,nrow=nr)
+ggsave(paste('mod5_segs_lon.png',sep=''),plot=pan,width=6,height=0.5+nr*1.5)
 
 ######################### 
 
@@ -152,7 +168,7 @@ lat_r1 <- start_value_rho(mod_lat, plot=TRUE)
 
 # Use bam in order for the AR options 
 # to take effect.
-for ( gamma in 1:20 ) {
+for ( gamma in 1:50 ) {
   mod_lat_ar <- bam(swim_lat ~ s(hydro_speed,bs="cs") 
                    + s(swim_urel,bs="cs")
                    + s(vor,bs="cs")
@@ -184,8 +200,14 @@ panels<-list()
 for ( vi in 1:length(var_names) ) {
   vname<-var_names[vi]
   p_val<-mod_lat_ar_sum$s.pv[vi]
-  if ( p_val > 0.05 ) { next }
-  if ( mod_lat_ar_sum$edf[vi] < 0.5) { next }
+  edf<-mod_lat_ar_sum$edf[vi]
+  signif <- (p_val <0.05) & edf > 0.5
+  #if ( p_val > 0.05 ) { next }
+  #if ( mod_lat_ar_sum$edf[vi] < 0.5) { next }
+  #print(paste(vname, edf, p_val,signif))
+  if ( !signif ) { 
+    next 
+  }
   if ( vname=='swim_lat' ) {
     coords <-coord_cartesian(ylim=Yl,xlim=c(0,0.5))
   } else if ( vname=='swim_urel' ) {
@@ -193,21 +215,22 @@ for ( vi in 1:length(var_names) ) {
   } else {
     coords<-Y 
   }
-  panel<-visreg(mod_lat_ar,vname,fill=list(fill="green"), points=pnt,gg=TRUE) + coords 
+  panel<-visreg(mod_lat_ar,vname,fill=list(fill="green"), points=pnt,gg=TRUE,
+                ylab=expression(Lateral~speed~(m~s^{-1}))) + coords 
   panels<-append(panels,list(panel))
 }
-pan<-grid.arrange(grobs=panels,nrow=1)
-ggsave(paste('mod3_segs_lat',vavg,'.png',sep=''),plot=pan,width=6,height=2.5)
+nr<-ceiling(length(panels)/3)
+pan<-grid.arrange(grobs=panels,nrow=nr)
+ggsave(paste('mod5_segs_lat.png',sep=''),plot=pan,width=6,height=0.5+1.5*nr)
 
-# Briefly revisit the possibility of encoding that some predictors are only functions
-# of tag:
-#  tensor product? Instead of a cs(reach_velo_ms), would the term be
-#    te(reach_velo_ms,tag)?
-#  No.  te should have two continuous variables, not a factor.
-# swim_urel(tag,idx) ~ reach_velo(tag)
-# Not seeing a clear path here.
-
+visreg(mod_lat_ar)
 # A bit more reading, and I think I need a better distribution. The qq-plot
 # (gam.check(mod_segs_ar)) suggests that the true distribution has heavier tails
-# than a normal.
+# than a normal. The scat family fixes this (fits4.r), but leads to convergence
+# issues and much larger residuals.
+
+visreg(mod_lat_ar,'swim_urel',fill=list(fill="green"), ,
+       points=pnt,gg=TRUE,band=FALSE) + coord_cartesian(ylim=Yl,xlim=c(-0.5,0.5))
+
+
 

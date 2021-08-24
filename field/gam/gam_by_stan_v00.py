@@ -18,7 +18,6 @@ Are there mgcv ways of penalizing the RE term?
 How would a Bayesian approach determine significance? have to remind myself
 of that part...
 
-
 """
 
 ##
@@ -44,8 +43,17 @@ def load_model(model_file):
                 return load_model(model_file)
     return sm
 
-## 
-seg_data = pd.read_csv('../hor_yaps/segment_correlates.csv')
+##
+
+# Can the multiple vertical averaging choices be used as a proxy for
+# the uncertainty in the swim speed?
+# HERE
+seg_datas = [ pd.read_csv(f'../hor_yaps/segment_correlates_{suffix}.csv')
+              for suffix in ['top1m','top2m','davg']]
+
+
+##
+seg_data = pd.read_csv('../hor_yaps/segment_correlates_top2m.csv')
 
 # convert tag id to a factor for use as random effect in mgcv
 #seg_data$tag <- factor(seg_data$id)
@@ -75,5 +83,19 @@ data['seg_tag']=mod_data['tag'].cat.codes
 # arrives at negative correlation, seems good.
 sm=load_model('model_00.stan')
 opt=sm.optimizing(data=data)
+print(f"model_00: swim_urel ~ {opt['m_hydro']:.3f}·hydro_speed  {opt['inter']:+.3f}") 
 
-# urel ~ hydro_speed + tag(re)
+##
+
+# urel ~ hydro_speed + swim_lat
+# arrives at the same sort of fits as gam.
+sm=load_model('model_01.stan')
+opt=sm.optimizing(data=data)
+print(f"model_00: swim_urel ~ ")
+print(f"   {opt['m_hydro']: .3f}·hydro_speed")
+print(f"   {opt['m_lat']: .3f}·swim_lat")
+print(f"   {opt['inter']:+.3f}") 
+
+##
+# For gam example, see
+# https://github.com/stan-dev/example-models/blob/master/misc/gam/gam_one_centered_design.stan

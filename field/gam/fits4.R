@@ -1,6 +1,10 @@
 # follow m-clark.github.io intro, use mgcv
 # fits2 tries to combine the inter- and intra- track
 # fits into a single operation.
+# fits4 tries a heavy-tailed distribution in order to 
+# get a better QQ plot.
+# Unfortunately it seems to make fitting twitchy, the residuals
+# are huge, and yet the uncertainty bands are no more convincing.
 library(mgcv)
 library(ggplot2)
 library(GGally)
@@ -15,7 +19,7 @@ library(itsadug)
 # in the swim_urel distribution as expected.
 # longitudinal analysis is twitchy. With davg velocity, turbidity
 # makes it in (!), and with top1m, reach_velo_ms makes it in. 
-vavg<-'davg'
+vavg<-'top2m'
 
 # raw data as output by track_analyses.py
 seg_data <- read.csv(paste('../hor_yaps/segment_correlates_',vavg,'.csv',sep=''))
@@ -56,15 +60,20 @@ mod_segs <- bam(swim_urel ~ s(hydro_speed,bs="cs")
                  + s(swim_lat,bs="cs")
                  + s(vor,bs="cs")
                  + s(waterdepth,bs="cs")
-                 #+ s(tag,bs='re')
                  + s(hour,bs="cc") 
                  + s(turb,bs='cs')
                  + s(reach_velo_ms,bs='cs'),
                  data=mod_data,knots=list(hour=c(0,24)),
                  weights=mod_data$weight,
+                 family=scat(link='identity',min.df=4),
                  gamma=1)
-# summary(mod_segs)
-# visreg(mod_segs) 
+# Did not converge with default min.df=3. Ok with min.df=4
+summary(mod_segs)
+gam.check(mod_segs) # Does show much better QQ plot, but large residuals.
+# switching to scale="response" does not help here -- probably because it's already
+# identity link. So the partials really are just wacko.
+visreg(mod_segs,partial=FALSE) 
+
 # inclusion of weights increased p-value for vor and waterdepth,
 # but they are still "significant" at this stage.
 
@@ -95,6 +104,7 @@ for ( gamma in 1:20 ) {
                   rho=r1, AR.start=mod_data$start.event,
                   data=mod_data,
                   weights=mod_data$weight,
+                  family=scat(link='identity',min.df=6),
                   gamma=gamma)
   max_edf<-max(summary(mod_segs_ar)$edf)
   print(paste("Gamma: ",gamma," max EDF: ",max_edf))
@@ -132,7 +142,7 @@ for ( vi in 1:length(var_names) ) {
 }
 
 pan<-grid.arrange(grobs=panels,nrow=2)
-ggsave(paste('mod3_segs_lon',vavg,'.png',sep=''),plot=pan,width=6,height=4.0)
+ggsave(paste('mod4_segs_lon',vavg,'.png',sep=''),plot=pan,width=6,height=4.0)
 
 ######################### 
 
