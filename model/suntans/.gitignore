@@ -6,3 +6,10 @@ local_config.py
 snubby-with_bathy.nc
 .ipynb_checkpoints
 log*
+snubby-08-edit60-with_bathysmoothadcp.nc
+snubby-08-refine-edit03-with_bathysmoothadcp.nc
+ptm_from_ugrid.grd
+model-slice-comparisons-*.pkl
+merge_v16_edit09-with_bathysmoothadcp.nc
+San_Joaquin_upstream_boundary.png
+cal_table.csv
