@@ -1,0 +1,259 @@
+# follow m-clark.github.io intro, use mgcv
+# fits2 tries to combine the inter- and intra- track
+# fits into a single operation.
+# fits5: combine data from all 3 vertical ranges, fit as a whole.
+library(mgcv)
+library(ggplot2)
+library(GGally)
+library(visreg)
+library(dplyr)
+library(gridExtra)
+library(itsadug)
+
+# Choice of vertical averaging:
+# The gamma values come out different for different vavg.
+# The lateral analysis is nearly identical, just with a shift
+# in the swim_urel distribution as expected.
+# longitudinal analysis is twitchy. With davg velocity, turbidity
+# makes it in (!), and with top1m, reach_velo_ms makes it in. 
+mod_datas=c()
+
+for ( vavg in c('top1m','top2m','davg') ) {
+  # raw data as output by track_analyses.py
+  seg_data <- read.csv(paste('../hor_yaps/segment_correlates_',vavg,'.csv',sep=''))
+  # convert tag id to a factor for use as random effect in mgcv
+  seg_data$tag <- factor(seg_data$id)
+  seg_data$waterdepth <- seg_data$model_z_eta - seg_data$model_z_bed
+  seg_data$vor <- abs(get(paste("model_vor_",vavg,sep=""),seg_data))
+  
+  cols <- c("tag","swim_urel","swim_lat","hydro_speed","turb","hour","flow_100m3s",
+            "vor","reach_velo_ms","waterdepth","tnum")
+  
+  dat <- start_event(seg_data[cols],"tnum",event="tag")
+  mod_datas=append(mod_datas,list(dat))
+}
+
+mod_data<- Reduce(rbind,mod_datas)
+
+# GAM for instantaneous rheotaxis
+# Most of the correlates do not have meaningful variation within a 
+# track, for example mean river flow does not change over the course
+# of a 20 minute track. A random effect term would thus be confounded
+# with the slow-moving parameters. For this reason, we omit the 
+# random effect.
+
+# For longitudinal swimming there is still the issue of bias related
+# to how quickly individuals exit the array.
+# Option A: weight samples as before, 1/nsamples for individual
+#  As before, this gives a lot of weight to very short tracks.
+# Option B: calculate a mean longitudinal swimming velocity, compare
+#  to the river velocity, and weight the samples by the inverse of
+#  the expected time in the array. 
+
+tags <- mod_data %>% count(tag)
+tags$weight <- 1./tags$n
+
+weights=merge( mod_data, tags, by="tag")$weight
+# Factor of 1/3 to account for duplicate measurements over vertical ranges. 
+mod_data$weight <- 1/3*weights/mean(weights)
+
+
+# Initial model with all potential terms included
+mod_segs <- bam(swim_urel ~ s(hydro_speed,bs="cs") 
+                 + s(swim_lat,bs="cs")
+                 + s(vor,bs="cs")
+                 + s(waterdepth,bs="cs")
+                 #+ s(tag,bs='re')
+                 + s(hour,bs="cc") 
+                 + s(turb,bs='cs')
+                 + s(reach_velo_ms,bs='cs'),
+                 data=mod_data,knots=list(hour=c(0,24)),
+                 weights=mod_data$weight,
+                 gamma=1)
+# summary(mod_segs)
+#visreg(mod_segs) 
+# inclusion of weights increased p-value for vor and waterdepth,
+# but they are still "significant" at this stage.
+
+# Omitting the random tag effect, increasing gamma to 20,
+# and using the 'cs' smooth where possible, the edf for 
+# vor, waterdepth, and turbidity and reach_velo_ms are reduced 
+# to 0. I think it's wrong to force gamma high at this point if
+# I'm going to turn around and remove autocorrelation.
+# So first fit with gamma=1, get ACF, fit again, and *then* tune
+# gamma.
+
+# Following tips here:
+# https://cran.r-project.org/web/packages/itsadug/vignettes/acf.html
+acf(resid(mod_segs), main="acf(resid(mod_segs))")
+r1 <- start_value_rho(mod_segs, plot=TRUE)
+
+# Have to use bam in order for the AR options 
+# to take effect.
+for ( gamma in 1:50 ) {
+  mod_segs_ar <- bam(swim_urel ~ s(hydro_speed,bs="cs") 
+                  + s(swim_lat,bs="cs")
+                  + s(vor,bs="cs")
+                  + s(waterdepth,bs="cs")
+                  #+ s(tag,bs='re')
+                  + s(hour,bs="cc") 
+                  + s(turb,bs='cs')
+                  + s(reach_velo_ms,bs='cs'),
+                  rho=r1, AR.start=mod_data$start.event,
+                  data=mod_data,
+                  weights=mod_data$weight,
+                  gamma=gamma)
+  max_edf<-max(summary(mod_segs_ar)$edf)
+  print(paste("Gamma: ",gamma," max EDF: ",max_edf))
+  if ( max_edf <= 4.0 ) {
+    break
+  }
+}
+mod_segs_ar_sum<-summary(mod_segs_ar)
+mod_segs_ar_sum
+
+# Now vorticity is a clear loser.
+# at gamma=2, turbidity is dropped.
+# at gamma=5, waterdepth, and reach_velo_ms also get dropped.
+options(repr.plot.width=6,repr.plot.height=3.0)
+Yl=c(-0.5,0.5)
+Y <- coord_cartesian(ylim=Yl,expand=FALSE)
+pnt<-list(alpha=0.2,size=0.4)
+
+thm<-theme_classic() +
+  theme(text = element_text(size=8),
+        axis.text=element_text(colour='black',size=rel(1.0)))
+
+# then test for any affect across
+# choice of velocity.
+var_names<-names(mod_segs_ar$var.summary)
+panels<-list()
+for ( vi in 1:length(var_names) ) {
+  vname<-var_names[vi]
+  p_val<-mod_segs_ar_sum$s.pv[vi]
+  if ( p_val > 0.05 ) { next }
+  if ( mod_segs_ar_sum$edf[vi] < 0.5) { next }
+  if ( vname=='swim_lat' ) {
+      coords <-coord_cartesian(ylim=Yl,xlim=c(0.0,0.5),expand=FALSE)
+    } else {
+      coords<-Y 
+    }
+  if (vname=='swim_lat') {
+    xlab<-expression(Lat.~speed~(m~s^{-1}))
+  } else if (vname=='hour' ){
+    xlab<-'Hour'
+  } else if (vname=='hydro_speed') {
+    xlab<-expression(Hydro.~speed~(m~s^{-1})) 
+  } else {
+    xlab<-vname
+  }
+  
+  if (length(panels)==0) {
+    ylab<-expression(Partial~residual~(m~s^{-1}))
+  } else {
+    ylab<-''
+  }
+  # Since the bands are probably too narrow, show the points but not
+  # the bands.
+  panel<-visreg(mod_segs_ar,vname,band=FALSE,# fill=list(fill="green"), 
+                line=list(col="black"),
+                points=pnt,gg=TRUE,
+                ylab=ylab,xlab=xlab) + thm + coords
+  panels<-append(panels,list(panel))
+}
+
+nr=ceiling(length(panels)/3)
+pan<-grid.arrange(grobs=panels,nrow=nr)
+
+ggsave(paste('mod5_segs_lon.png',sep=''),plot=pan,width=6,height=0.5+nr*1.5)
+
+######################### 
+
+mod_lat <- bam(swim_lat ~ s(hydro_speed,bs="cs") 
+                + s(swim_urel,bs="cs")
+                + s(vor,bs="cs")
+                + s(waterdepth,bs="cs")
+                + s(hour,bs="cc") 
+                + s(turb,bs='cs')
+                + s(reach_velo_ms,bs='cs'),
+                data=mod_data,knots=list(hour=c(0,24)),
+                weights=mod_data$weight,
+                gamma=1)
+
+acf(resid(mod_lat), main="acf(resid(mod_lat))")
+lat_r1 <- start_value_rho(mod_lat, plot=TRUE)
+
+# Use bam in order for the AR options 
+# to take effect.
+for ( gamma in 1:50 ) {
+  mod_lat_ar <- bam(swim_lat ~ s(hydro_speed,bs="cs") 
+                   + s(swim_urel,bs="cs")
+                   + s(vor,bs="cs")
+                   + s(waterdepth,bs="cs")
+                   #+ s(tag,bs='re')
+                   + s(hour,bs="cc") 
+                   + s(turb,bs='cs')
+                   + s(reach_velo_ms,bs='cs'),
+                   rho=lat_r1, AR.start=mod_data$start.event,
+                   data=mod_data,
+                   weights=mod_data$weight,
+                   gamma=gamma)
+  max_edf<-max(summary(mod_lat_ar)$edf)
+  print(paste("Gamma: ",gamma," max EDF: ",max_edf))
+  if ( max_edf <= 4.0 ) {
+    break
+  }
+}
+mod_lat_ar_sum<-summary(mod_lat_ar)
+mod_lat_ar_sum
+
+
+options(repr.plot.width=6,repr.plot.height=5.5)
+Yl=c(-0.1,0.5)
+Y <- coord_cartesian(ylim=Yl,expand=FALSE)
+
+var_names<-names(mod_lat_ar$var.summary)
+panels<-list()
+for ( vi in 1:length(var_names) ) {
+  vname<-var_names[vi]
+  p_val<-mod_lat_ar_sum$s.pv[vi]
+  edf<-mod_lat_ar_sum$edf[vi]
+  signif <- (p_val <0.05) & edf > 0.5
+  #if ( p_val > 0.05 ) { next }
+  #if ( mod_lat_ar_sum$edf[vi] < 0.5) { next }
+  #print(paste(vname, edf, p_val,signif))
+  if ( !signif ) { 
+    next 
+  }
+  xlab<-vname
+  if ( vname=='swim_lat' ) {
+    coords <-coord_cartesian(ylim=Yl,xlim=c(0,0.5),expand=FALSE)
+  } else if ( vname=='swim_urel' ) {
+    coords <- coord_cartesian(ylim=Yl,xlim=c(-0.6,0.6),expand=FALSE)
+    xlab<-expression(Long.~velocity~(m~s^{-1}))
+  } else if (vname=='hour') {
+    xlab<-'Hour'
+    coords <- coord_cartesian(ylim=Yl,xlim=c(0,24),expand=FALSE)
+  } else if (vname=='reach_velo_ms') {
+    xlab<-expression(River~velocity~(m~s^{-1}))
+    coords <- coord_cartesian(ylim=Yl,xlim=c(0.15,0.75))
+  } else {
+    coords<-Y 
+  }
+  
+  if (length(panels)==0){
+    ylab<-expression(Partial~residual~(m~s^{-1}))
+  } else {
+    ylab<-''
+  }
+  
+  panel<-visreg(mod_lat_ar,vname,band=FALSE, points=pnt,gg=TRUE,
+                line=list(col="black"),
+                xlab=xlab,ylab=ylab) + thm + coords 
+  panels<-append(panels,list(panel))
+}
+nr<-ceiling(length(panels)/3)
+pan<-grid.arrange(grobs=panels,nrow=nr)
+ggsave(paste('mod5_segs_lat.png',sep=''),plot=pan,width=6,height=0.5+1.5*nr)
+
+#visreg(mod_lat_ar)

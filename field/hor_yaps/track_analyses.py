@@ -18,7 +18,7 @@ from scipy import signal
 
 vel_suffix='_top2m'
 
-fig_dir="fig_analysis-20210305"+vel_suffix
+fig_dir="fig_analysis-20210623"+vel_suffix
 if not os.path.exists(fig_dir):
     os.makedirs(fig_dir)
 
@@ -54,6 +54,7 @@ df_start['tod_mid_octant']=1.5 + 3*np.floor(df_start['tod_mid_s']/(3*3600.))
 # Pattern of time-of-day and swim speed
 df_start['mean_swim_urel']=df_start.track.apply( lambda t: np.nanmean( t.swim_urel) )
 df_start['mean_swim_lateral']=df_start.track.apply( lambda t: np.nanmean( np.abs(t.swim_vrel)) )
+df_start['mean_swim_longitudinal']=df_start.track.apply( lambda t: np.nanmean( np.abs(t.swim_urel)) )
 
 
 df_start['mean_gnd_urel']=df_start.track.apply( lambda t: np.nanmean( t.ground_urel) )
@@ -184,12 +185,29 @@ fig.savefig(os.path.join(fig_dir,'octant-swim_lateral.png'))
 
 ##
 
+# Longitudinal speed
+fig=plt.figure(135)
+fig.clf()
+ax=fig.add_subplot(111)
+
+# bin by 3 hour chunks
+df_start['tod_mid_octant']=1.5 + 3*np.floor(df_start['tod_mid_s']/(3*3600.))
+boxplot_n(x='tod_mid_octant',y='mean_swim_longitudinal',data=df_start,ax=ax)
+ax.set_xlabel('Middle of 3-hour bin (h)')
+ax.set_ylabel('Mean longitudinal swimming magnitude')
+fig.savefig(os.path.join(fig_dir,'octant-swim_longitudinal.png'))
+
+# Borderline. 
+
+##
+
 # Manuscript figure [diel]
 # Two panels, combining figure 32 and 33 above.
 fig=plt.figure(132)
 fig.set_size_inches([6.5,2.8],forward=True)
 fig.clf()
 fig,axs=plt.subplots(1,2,num=132)
+fs=8.5
 
 # Longitudinal
 # bin by 3 hour chunks
@@ -198,7 +216,6 @@ boxplot_n(x='tod_mid_octant',y='mean_swim_urel',data=df_start,ax=axs[0],
 axs[0].set_xlabel('Time of day')
 axs[0].set_ylabel('Longitudinal velocity (m s$^{-1}$)')
 
-fs=8.5
 
 # Lateral
 df_start['tod_mid_octant']=1.5 + 3*np.floor(df_start['tod_mid_s']/(3*3600.))
@@ -257,54 +274,57 @@ print("Rayleigh statistic for time of day of arrival: %.4f"%p_rayleigh_arrival)
 # Can I just use u_lateral as the weighting? No, the result is not independent
 # of the mean value.
 # 0.1715
-lateral=df_start['mean_swim_lateral'].values
 
 ## What if I brute force it?
 
-lat_vec=np.c_[ np.cos(tod_mid_rad)*lateral,
-               np.sin(tod_mid_rad)*lateral ]
+lateral=df_start['mean_swim_lateral'].values
+    
+def test_diel(column,df_start=df_start,num=1):
+    data=df_start[column].values
+    vec=np.c_[ np.cos(tod_mid_rad)*data,
+               np.sin(tod_mid_rad)*data ]
+    vec_mean=vec.mean(axis=0)
+    vec_mag=utils.mag(vec_mean)
+    shuffle_mags=[]
+    shuffle_vecs=[]
+    N=10000 # should be ~1e2 bigger 
+    for _ in range(N):
+        shuffle_rad=np.random.permutation(tod_mid_rad)
+        shuffle_mean=np.mean( np.c_[ np.cos(shuffle_rad)*data,
+                                     np.sin(shuffle_rad)*data ],
+                              axis=0)
+        shuffle_vecs.append(shuffle_mean)
+        shuffle_mag=utils.mag(shuffle_mean)
+        shuffle_mags.append(shuffle_mag)
 
-lat_vec_mean=lat_vec.mean(axis=0)
-lat_vec_mag=utils.mag(lat_vec_mean)
+    shuffle_vecs=np.array(shuffle_vecs)
 
+    plt.figure(num).clf()
+    fig,ax=plt.subplots(num=num)
+    ax.plot(vec[:,0],vec[:,1],'g+')
+    ax.axhline(0,color='k',lw=0.5)
+    ax.axvline(0,color='k',lw=0.5)
 
-shuffle_mags=[]
-shuffle_vecs=[]
-N=10000 # should be ~1e2 bigger 
-for _ in range(N):
-    shuffle_rad=np.random.permutation(tod_mid_rad)
-    shuffle_mean=np.mean( np.c_[ np.cos(shuffle_rad)*lateral,
-                                 np.sin(shuffle_rad)*lateral ],
-                          axis=0)
-    shuffle_vecs.append(shuffle_mean)
-    shuffle_mag=utils.mag(shuffle_mean)
-    shuffle_mags.append(shuffle_mag)
+    ax.plot([vec_mean[0]],[vec_mean[1]],'mo',zorder=3)
+    stride=slice(None,None,N//1000)
+    ax.plot(shuffle_vecs[stride,0],shuffle_vecs[stride,1],'ko',alpha=0.1)
 
-shuffle_vecs=np.array(shuffle_vecs)
+    mag_sort=np.sort(shuffle_mags)
 
-## 
-plt.figure(1).clf()
-fig,ax=plt.subplots(num=1)
-ax.plot(lat_vec[:,0],lat_vec[:,1],'g+')
-ax.axhline(0,color='k',lw=0.5)
-ax.axvline(0,color='k',lw=0.5)
+    p=1-np.searchsorted(mag_sort,vec_mag)/float(1+len(mag_sort))
+    if mag_sort[-1]<vec_mag:
+        print("p < %.6f"%p)
+    else:
+        print("p ~ %.6f"%p)
 
-ax.plot([lat_vec_mean[0]],[lat_vec_mean[1]],'go',zorder=3)
-stride=slice(None,None,N//1000)
-ax.plot(shuffle_vecs[stride,0],shuffle_vecs[stride,1],'ko',alpha=0.1)
+    ax.axis('equal')
+    ax.set_adjustable('box')
+    ax.axis(xmin=-0.15,xmax=0.15,ymin=-0.15,ymax=0.15)
+    fig.savefig(os.path.join(fig_dir,f'diel-{column}-scatter.png'),dpi=200)
 
-mag_sort=np.sort(shuffle_mags)
-
-p=1-np.searchsorted(mag_sort,lat_vec_mag)/float(1+len(mag_sort))
-if mag_sort[-1]<lat_vec_mag:
-    print("p < %.6f"%p)
-else:
-    print("p ~ %.6f"%p)
-
-ax.axis('equal')
-ax.set_adjustable('box')
-ax.axis(xmin=-0.15,xmax=0.15,ymin=-0.15,ymax=0.15)
-fig.savefig(os.path.join(fig_dir,'diel-lateral-scatter.png'),dpi=200)
+# test_diel('mean_swim_lateral',df_start,num=1)
+# test_diel('mean_swim_longitudinal',df_start,num=2)
+test_diel('mean_swim_urel',df_start,num=3)
 
 ## 
 # how does that compare to using a multilinear regression?
@@ -502,8 +522,15 @@ df_start['flow_m3s']=np.interp( df_start.t_mid,
                                 utils.to_unix(msd_flow.time.values), msd_flow.flow_m3s)
 df_start['velo_ms']=np.interp( df_start.t_mid,
                                utils.to_unix(msd_velo.time.values), msd_velo.velocity_ms)
+
 df_start['time_mid']=utils.unix_to_dt64(df_start.t_mid)
 df_start['doy']=df_start.time_mid.dt.dayofyear
+
+# For comparison below, get a velocity calculated (roughly) for the analysis polygon
+# This is similar to velo_ms, but has a bit more range
+import transport_analysis as ta
+reach_velo=ta.calc_reach_velo(df_start.time_mid.values)
+df_start['reach_velo_ms']=reach_velo['vel'].values
 
 ##
 
@@ -577,7 +604,7 @@ fig.savefig(os.path.join(fig_dir,'flow-swimming.png'))
 ##
 
 # Try fitting linear model
-df_to_fit=df_start.loc[:, ['mean_swim_urel','mean_swim_lateral','turb','flow_m3s','velo_ms','doy'] ]
+# df_to_fit=df_start.loc[:, ['mean_swim_urel','mean_swim_lateral','turb','flow_m3s','reach_velo_ms','doy'] ]
 
 print(f"N = {len(df_start)}")
 
@@ -585,10 +612,10 @@ print(f"N = {len(df_start)}")
 from scipy.stats import spearmanr,kendalltau
 
 for endog in ['mean_swim_urel','mean_swim_lateral']:
-    for exog in ['turb','flow_m3s','doy','velo_ms']:
+    for exog in ['turb','flow_m3s','doy','reach_velo_ms']:
         s_corr,s_p=spearmanr(a=df_start[endog],
                              b=df_start[exog])
-        print("%20s ~ %10s  Spearman rho=%.3f  p-value=%.6f"%(endog, exog, s_corr,s_p))
+        print("%20s ~ %15s  Spearman rho=%.3f  p-value=%.6f"%(endog, exog, s_corr,s_p))
         # k_corr,k_p=kendalltau(x=df_start[endog],
         #                       y=df_start[exog])
         # print("%20s ~ %10s  Kendall corr=%.3f  p-value=%.6f"%("", "", k_corr,k_p))
@@ -601,12 +628,12 @@ for endog in ['mean_swim_urel','mean_swim_lateral']:
 #        mean_swim_urel ~       turb  Spearman rho=-0.319  p-value=0.000368
 #        mean_swim_urel ~   flow_m3s  Spearman rho=-0.315  p-value=0.000430
 #        mean_swim_urel ~        doy  Spearman rho=-0.338  p-value=0.000149
-#        mean_swim_urel ~    velo_ms  Spearman rho=-0.300  p-value=0.000844
+#        mean_swim_urel ~    reach_velo_ms  Spearman rho=-0.303  p-value=0.000741
 #  
 #     mean_swim_lateral ~       turb  Spearman rho=0.000  p-value=0.999353
 #     mean_swim_lateral ~   flow_m3s  Spearman rho=-0.053  p-value=0.560852
 #     mean_swim_lateral ~        doy  Spearman rho=-0.047  p-value=0.612347
-#     mean_swim_lateral ~    velo_ms  Spearman rho=-0.048  p-value=0.603427
+#     mean_swim_lateral ~ reach_velo_ms  Spearman rho=-0.056  p-value=0.540080
 
 ##
 def stand(x):
@@ -629,7 +656,7 @@ import statsmodels.formula.api as smf
 for formula in ['mean_swim_urel ~ flow_m3s',
                 'mean_swim_urel ~ turb',
                 'mean_swim_urel ~ doy',
-                'mean_swim_urel ~ velo_ms',
+                'mean_swim_urel ~ reach_velo_ms',
                 'mean_swim_urel ~ flow_m3s + turb',
                 'mean_swim_urel ~ flow_m3s + doy',
                 'mean_swim_urel ~ turb + doy',
@@ -663,6 +690,74 @@ fig.savefig(os.path.join(fig_dir,'scatter-flow-u_rel.png'),dpi=200)
 
 ##
 
+# print("-------- Downstream groundspeed vs. MSD velocity ------ ")
+# # Compare river velocity and mean downstream speed over ground.
+# mod = smf.ols(formula='mean_gnd_urel ~ velo_ms',
+#               data=df_start)
+# res = mod.fit()
+# print(res.summary())
+# print(f"{formula:40}: R^2={res.rsquared:.3f}   AIC={res.aic:.2f}   BIC={res.bic:.2f}")
+
+# I think it's saying:
+# mean_gnd_urel = (0.94±0.1)*velo_ms - 0.06±0.05
+# Hmm - but that's a bulk river velocity relative to what
+# cross-section?  The 0.94 could just be because the measurement
+# is from a narrower location.
+# Is this going to be a big signal? Probably not...
+
+##
+
+print("-------- Downstream groundspeed vs. Reach velocity ------ ")
+mod = smf.ols(formula='mean_gnd_urel ~ reach_velo_ms',
+              data=df_start)
+res = mod.fit()
+
+print(res.summary())
+print(f"{formula:40}: R^2={res.rsquared:.3f}   AIC={res.aic:.2f}   BIC={res.bic:.2f}")
+##
+
+# Another way to look at this:
+# But this gives marginally insignificant results.
+# So fish are obviously transported by the mean flow, with great significance.
+# But whether that coefficient is distiguishable from 1 is cannot be determined
+# with sufficient significance.
+
+## 
+# A more basic question is whether there is net rheotaxis.  If there is
+# not net rheotaxis, then reach_velo_ms and mean_gnd_urel would be
+# indistinguishable.
+df_start['net_rheo']=df_start['reach_velo_ms'] - df_start['mean_gnd_urel']
+
+for formula in [ 'net_rheo ~ reach_velo_ms',
+                 # 'net_rheo ~ 1',
+                 # 'net_rheo ~ reach_velo_ms - 1'
+]:
+    mod = smf.ols(formula=formula, # 'net_rheo ~ reach_velo_ms',
+                  data=df_start)
+    res = mod.fit()
+    print(res.summary())
+    print(f"{formula:40}: R^2={res.rsquared:.3f}   AIC={res.aic:.2f}   BIC={res.bic:.2f}")
+
+# This is giving similar results, though the coefficient is smaller.
+# Related to my data having a larger range than the MSD data.
+
+## 
+f_stat,p_value=stats.f_oneway(df_start['reach_velo_ms'],
+                              df_start['mean_gnd_urel'])
+print(f"ANOVA comparing mean u_ground and mean river velocity: {f_stat:.4f} p={p_value:.5f}")
+
+# p=0.018
+f_stat,p_value=stats.kruskal(df_start['reach_velo_ms'],
+                             df_start['mean_gnd_urel'])
+print(f"Kruskal-Wallis comparing mean u_ground and mean river velocity: {f_stat:.4f} p={p_value:.5f}")
+print( df_start[ ['reach_velo_ms','mean_gnd_urel'] ].median())
+
+## 
+# Is rheotaxis better described as a constant, a fraction of u_river, or a combination?
+
+
+
+##
 # Fits at the sample level, across all tracks, to compare local hydro speed
 # and river flow.
 
@@ -670,6 +765,7 @@ for idx,row in df_start.iterrows():
     row['track']['id'] = idx
     row['track']['flow_m3s']=row['flow_m3s']
     row['track']['velo_ms']=row['velo_ms']
+    row['track']['reach_velo_ms']=row['reach_velo_ms']
     row['track']['turb']=row['turb']
     
 seg_tracks=pd.concat( [ track.iloc[:-1,:]
@@ -753,12 +849,12 @@ seg_tracks['flow_100m3s']=seg_tracks['flow_m3s']/100.
 
 results=[]
 for formula in [ 'swim_urel ~ hydro_speed',
-                 'swim_urel ~ velo_ms',
+                 'swim_urel ~ reach_velo_ms',
                  'swim_urel ~ turb',
                  'swim_urel ~ hydro_speed + turb',                 
-                 'swim_urel ~ hydro_speed + velo_ms',
-                 'swim_urel ~ turb + velo_ms',
-                 'swim_urel ~ hydro_speed + turb + velo_ms',
+                 'swim_urel ~ hydro_speed + reach_velo_ms',
+                 'swim_urel ~ turb + reach_velo_ms',
+                 'swim_urel ~ hydro_speed + turb + reach_velo_ms',
                  # 'swim_urel ~ flow_100m3s',
                  #'swim_urel ~ hydro_anom',
                  # 'swim_urel ~ hydro_anom + velo_ms',
@@ -801,3 +897,15 @@ ffits.rename({'formula':'Model',
              inplace=True,axis=1)
 print(ffits)
 #print( fits.style.format({'rsq': '{:.4f}', 'bic': '{:.0f}'}) )
+
+
+##
+
+# Add time of day and write csv for GAM attempt in R
+tod_m_s=(seg_tracks['tnum_m']-7*3600)%86400. # PDT
+hour=tod_m_s/3600.
+
+data_for_gam=seg_tracks.copy()
+
+data_for_gam['hour']=hour
+data_for_gam.to_csv('segment_correlates.csv',index=False)
